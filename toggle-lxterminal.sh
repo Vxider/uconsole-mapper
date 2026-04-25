@@ -31,11 +31,9 @@ find_window_spec() {
 
 if [[ -x "$WLRCTL" ]]; then
   if spec="$(find_window_spec)"; then
-    if "$WLRCTL" window find "$spec" "state:active" >/dev/null 2>&1; then
-      exec "$WLRCTL" window minimize "$spec"
-    fi
-
-    exec "$WLRCTL" window focus "$spec"
+    "$WLRCTL" toplevel activate "$spec" >/dev/null 2>&1 || true
+    "$WLRCTL" toplevel focus "$spec" >/dev/null 2>&1 || true
+    exit 0
   fi
 fi
 

@@ -31,6 +31,8 @@ enabled = true
 grab = true
 device_name_patterns = ["ClockworkPI uConsole Keyboard"]
 debounce_ms = 250
+repeat_rate = 30
+repeat_delay_ms = 300
 
 [[keyboard.bindings]]
 buttons = ["KEY_RIGHTSHIFT", "KEY_C"]

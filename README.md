@@ -77,6 +77,8 @@ enabled = true
 grab = true
 device_name_patterns = ["ClockworkPI uConsole Keyboard"]
 debounce_ms = 250
+repeat_rate = 30
+repeat_delay_ms = 300
 
 [[keyboard.bindings]]
 buttons = ["KEY_RIGHTSHIFT", "KEY_C"]
@@ -147,6 +149,8 @@ If the service does not start, check these first:
 
 `keyboard.bindings` also supports these fields:
 
+- `repeat_rate`: virtual keyboard repeat rate in keys per second; default `30`
+- `repeat_delay_ms`: virtual keyboard repeat delay in milliseconds; default `300`
 - `emit_rel` + `emit_rel_value`: sends relative mouse events such as wheel scrolling
 - `repeat_ms`: repeat interval while held after triggering, in milliseconds; default `0`
 - `text`: types a string through `wtype`

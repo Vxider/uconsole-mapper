@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 
 from __future__ import annotations
 
@@ -83,6 +83,8 @@ class Config:
     keyboard_grab: bool
     keyboard_patterns: list[str]
     keyboard_debounce_ms: int
+    keyboard_repeat_rate: int
+    keyboard_repeat_delay_ms: int
     keyboard_bindings: list[Binding]
     mouse_enabled: bool
     mouse_grab: bool
@@ -157,6 +159,8 @@ def load_config(path: Path) -> Config:
         keyboard_grab=bool(keyboard.get("grab", True)),
         keyboard_patterns=list(keyboard.get("device_name_patterns", ["ClockworkPI uConsole Keyboard"])),
         keyboard_debounce_ms=int(keyboard.get("debounce_ms", 250)),
+        keyboard_repeat_rate=int(keyboard.get("repeat_rate", 30)),
+        keyboard_repeat_delay_ms=int(keyboard.get("repeat_delay_ms", 300)),
         keyboard_bindings=keyboard_bindings,
         mouse_enabled=bool(mouse.get("enabled", True)),
         mouse_grab=bool(mouse.get("grab", True)),
@@ -364,7 +368,13 @@ class GamepadWatcher:
 
 
 class VirtualKeyboard:
-    def __init__(self, device: InputDevice, extra_keys: set[int] | None = None) -> None:
+    def __init__(
+        self,
+        device: InputDevice,
+        repeat_rate: int,
+        repeat_delay_ms: int,
+        extra_keys: set[int] | None = None,
+    ) -> None:
         capabilities = {
             event_type: list(codes)
             for event_type, codes in device.capabilities().items()
@@ -384,6 +394,12 @@ class VirtualKeyboard:
             bustype=device.info.bustype,
             phys=f"{device.phys or 'uconsole'}/virtual",
         )
+        # Keep repeat settings explicit so held keys repeat globally even when
+        # the physical keyboard is grabbed and re-emitted through uinput.
+        try:
+            self.ui.device.repeat = (repeat_delay_ms, repeat_rate)
+        except (AttributeError, OSError) as exc:
+            LOGGER.warning("failed to configure keyboard repeat on virtual device: %s", exc)
 
     def close(self) -> None:
         self.ui.close()
@@ -413,7 +429,12 @@ class KeyboardWatcher:
             extra_keys = {
                 binding.emit_key for binding in self.config.keyboard_bindings if binding.emit_key is not None
             }
-            self.virtual_keyboard = VirtualKeyboard(device, extra_keys)
+            self.virtual_keyboard = VirtualKeyboard(
+                device,
+                repeat_rate=self.config.keyboard_repeat_rate,
+                repeat_delay_ms=self.config.keyboard_repeat_delay_ms,
+                extra_keys=extra_keys,
+            )
         self.binding_codes = self._binding_codes()
         self.pressed: set[int] = set()
         self.pending_order: list[int] = []
@@ -483,9 +504,9 @@ class KeyboardWatcher:
             matched = binding.buttons.issubset(self.pressed)
             was_active = index in self.active_bindings
             if matched and not was_active:
-                self._trigger_binding(binding)
+                self._activate_binding(binding)
                 self.active_bindings.add(index)
-                if binding.repeat_ms > 0:
+                if binding.repeat_ms > 0 and binding.emit_key is None:
                     self.repeat_tasks[index] = asyncio.create_task(self._repeat_binding(index, binding))
                 self.consumed_keys.update(binding.buttons)
                 for code in binding.buttons:
@@ -495,16 +516,16 @@ class KeyboardWatcher:
                 task = self.repeat_tasks.pop(index, None)
                 if task is not None:
                     task.cancel()
+                self._deactivate_binding(binding)
 
         active_codes: set[int] = set()
         for index in self.active_bindings:
             active_codes.update(self.config.keyboard_bindings[index].buttons)
         self.consumed_keys = active_codes
 
-    def _trigger_binding(self, binding: Binding) -> None:
+    def _activate_binding(self, binding: Binding) -> None:
         if binding.emit_key is not None and self.virtual_keyboard is not None:
             self.virtual_keyboard.write_key(binding.emit_key, 1)
-            self.virtual_keyboard.write_key(binding.emit_key, 0)
             return
         if binding.emit_rel is not None and self.virtual_mouse is not None:
             self.virtual_mouse.write_synthetic_rel(binding.emit_rel, binding.emit_rel_value)
@@ -512,6 +533,10 @@ class KeyboardWatcher:
             return
         if binding.command or binding.text is not None:
             self.runner.run(binding, self.config.keyboard_debounce_ms)
+
+    def _deactivate_binding(self, binding: Binding) -> None:
+        if binding.emit_key is not None and self.virtual_keyboard is not None:
+            self.virtual_keyboard.write_key(binding.emit_key, 0)
 
     async def _repeat_binding(self, index: int, binding: Binding) -> None:
         try:
@@ -521,13 +546,21 @@ class KeyboardWatcher:
                     return
                 if not binding.buttons.issubset(self.pressed):
                     return
-                self._trigger_binding(binding)
+                self._activate_binding(binding)
         except asyncio.CancelledError:
             return
 
     def _handle_key(self, code: int, value: int) -> None:
         if not self.config.keyboard_grab:
             self._handle_key_passthrough(code, value)
+            return
+
+        if value == 2:
+            if code in self.consumed_keys:
+                return
+            if code in self.pending_set:
+                self._flush_pending()
+            self.virtual_keyboard.write_key(code, 1)
             return
 
         is_pressed = value != 0
@@ -576,15 +609,16 @@ class KeyboardWatcher:
             matched = binding.buttons.issubset(self.pressed)
             was_active = index in self.active_bindings
             if matched and not was_active:
-                self._trigger_binding(binding)
+                self._activate_binding(binding)
                 self.active_bindings.add(index)
-                if binding.repeat_ms > 0:
+                if binding.repeat_ms > 0 and binding.emit_key is None:
                     self.repeat_tasks[index] = asyncio.create_task(self._repeat_binding(index, binding))
             elif not matched and was_active:
                 self.active_bindings.remove(index)
                 task = self.repeat_tasks.pop(index, None)
                 if task is not None:
                     task.cancel()
+                self._deactivate_binding(binding)
 
 
 class VirtualMouse:
