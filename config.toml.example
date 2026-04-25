@@ -19,6 +19,13 @@ hold_ms = 700
 text = "继续"
 press_enter = true
 
+# Push-to-talk voice input.
+# Replace BTN_THUMB2 with the actual B key code on your device if needed.
+# [[gamepad.bindings]]
+# buttons = ["BTN_THUMB2"]
+# press_command = "~/.local/bin/uconsole-voice-ptt start"
+# release_command = "~/.local/bin/uconsole-voice-ptt stop"
+
 [keyboard]
 enabled = true
 grab = true
@@ -28,10 +35,6 @@ debounce_ms = 250
 [[keyboard.bindings]]
 buttons = ["KEY_RIGHTSHIFT", "KEY_C"]
 command = "~/.local/bin/run-or-raise-chromium"
-
-[[keyboard.bindings]]
-buttons = ["KEY_RIGHTALT", "KEY_L"]
-command = "~/.local/bin/toggle-display"
 
 [[keyboard.bindings]]
 buttons = ["KEY_LEFTCTRL", "KEY_J"]

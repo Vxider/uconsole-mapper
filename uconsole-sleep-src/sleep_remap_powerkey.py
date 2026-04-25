@@ -2,8 +2,6 @@
 from __future__ import annotations
 
 import os
-import select
-import stat
 import threading
 import time
 
@@ -17,9 +15,6 @@ HOLD_TRIGGER_SEC = float(os.environ.get("HOLD_TRIGGER_SEC") or 0.7)
 LOCK_KEY_ENABLED = os.environ.get("LOCK_KEY_ENABLED", "yes") == "yes"
 LOCK_KEY_DEVICE_NAME = os.environ.get(
     "LOCK_KEY_DEVICE_NAME", "ClockworkPI uConsole Consumer Control"
-)
-CONTROL_FIFO_PATH = os.environ.get(
-    "CONTROL_FIFO_PATH", "/run/uconsole-sleep/toggle-display.fifo"
 )
 
 
@@ -39,42 +34,6 @@ DISPLAY_TOGGLE_LOCK = threading.Lock()
 def toggle_display_safe() -> None:
     with DISPLAY_TOGGLE_LOCK:
         toggle_display()
-
-
-def ensure_control_fifo(path: str) -> None:
-    parent = os.path.dirname(path)
-    if parent:
-        os.makedirs(parent, exist_ok=True)
-    if os.path.exists(path):
-        if not stat.S_ISFIFO(os.stat(path).st_mode):
-            raise RuntimeError(f"control path exists and is not a fifo: {path}")
-    else:
-        os.mkfifo(path, 0o666)
-    os.chmod(path, 0o666)
-
-
-def run_control_fifo_handler() -> None:
-    ensure_control_fifo(CONTROL_FIFO_PATH)
-    fd = os.open(CONTROL_FIFO_PATH, os.O_RDWR | os.O_NONBLOCK)
-    buffer = ""
-    try:
-        print(f"SRP: control fifo active at {CONTROL_FIFO_PATH}.", flush=True)
-        while True:
-            readable, _, _ = select.select([fd], [], [])
-            if fd not in readable:
-                continue
-            chunk = os.read(fd, 4096)
-            if not chunk:
-                continue
-            buffer += chunk.decode("utf-8", errors="replace")
-            while "\n" in buffer:
-                line, buffer = buffer.split("\n", 1)
-                command = line.strip().lower()
-                if command == "toggle":
-                    print("SRP: fifo toggle command received.", flush=True)
-                    toggle_display_safe()
-    finally:
-        os.close(fd)
 
 
 def find_device_by_name(name: str) -> str:
@@ -180,9 +139,6 @@ def main() -> None:
     power_event_device = find_power_key()
     if not power_event_device:
         raise Exception("there's no matched power key")
-
-    fifo_thread = threading.Thread(target=run_control_fifo_handler, daemon=True)
-    fifo_thread.start()
 
     lock_thread = threading.Thread(target=run_lock_key_handler, daemon=True)
     lock_thread.start()

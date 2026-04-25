@@ -32,11 +32,14 @@ fi
 install -m 0755 "${SCRIPT_DIR}/uconsole_mapper.py" "${APP_DIR}/uconsole_mapper.py"
 install -m 0755 "${SCRIPT_DIR}/toggle-codex-buddy.sh" "${BIN_DIR}/toggle-codex-buddy"
 install -m 0755 "${SCRIPT_DIR}/toggle-lxterminal.sh" "${BIN_DIR}/toggle-lxterminal"
-install -m 0755 "${SCRIPT_DIR}/toggle-display.sh" "${BIN_DIR}/toggle-display"
+install -m 0755 "${SCRIPT_DIR}/uconsole-voice-ptt.sh" "${BIN_DIR}/uconsole-voice-ptt"
 install -m 0644 "${SCRIPT_DIR}/uconsole-mapper.service" "${SYSTEMD_DIR}/uconsole-mapper.service"
 
 if [[ ! -f "${CONFIG_DIR}/config.toml" ]]; then
   install -m 0644 "${SCRIPT_DIR}/config.toml.example" "${CONFIG_DIR}/config.toml"
+fi
+if [[ ! -f "${CONFIG_DIR}/voice.env" ]]; then
+  install -m 0644 "${SCRIPT_DIR}/voice.env.example" "${CONFIG_DIR}/voice.env"
 fi
 
 systemctl --user daemon-reload

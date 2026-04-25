@@ -8,7 +8,6 @@
 - `BTN_TOP`（你说的右侧 `Y`）管理 `QuickTerm`
 - `BTN_THUMB`（右侧 `A`）长按 `700ms` 输入 `继续` 并回车
 - `KEY_RIGHTSHIFT + KEY_C` 打开 Chromium
-- `KEY_RIGHTALT + KEY_L` 优先通过 `uconsole-sleep` 切换内屏电源
 - `KEY_LEFTCTRL + KEY_J/K` 映射成鼠标滚轮下/上，按住连续滚动
 - 鼠标 `BTN_MIDDLE` 映射成 `BTN_LEFT`
 
@@ -28,9 +27,9 @@
 
 ```bash
 sudo apt update
-sudo apt install -y python3-evdev wtype
+sudo apt install -y python3-evdev wtype curl jq
 sudo modprobe uinput
-cd ~/WorkSpace/uconsole
+cd ~/WorkSpace/uconsole-mapper
 ./install.sh
 ```
 
@@ -66,6 +65,13 @@ hold_ms = 700
 text = "继续"
 press_enter = true
 
+# Push-to-talk voice input.
+# Replace BTN_THUMB2 with the actual B key code on your device if needed.
+# [[gamepad.bindings]]
+# buttons = ["BTN_THUMB2"]
+# press_command = "~/.local/bin/uconsole-voice-ptt start"
+# release_command = "~/.local/bin/uconsole-voice-ptt stop"
+
 [keyboard]
 enabled = true
 grab = true
@@ -75,10 +81,6 @@ debounce_ms = 250
 [[keyboard.bindings]]
 buttons = ["KEY_RIGHTSHIFT", "KEY_C"]
 command = "~/.local/bin/run-or-raise-chromium"
-
-[[keyboard.bindings]]
-buttons = ["KEY_RIGHTALT", "KEY_L"]
-command = "~/.local/bin/toggle-display"
 
 [[keyboard.bindings]]
 buttons = ["KEY_LEFTCTRL", "KEY_J"]
@@ -125,36 +127,10 @@ journalctl --user -u uconsole-mapper.service -f
 
 - `python3-evdev` 是否已安装
 - 使用文本输入绑定时，`wtype` 是否已安装
-- 使用 `toggle-display` 时，`uconsole-sleep` 的 FIFO 或 `wlopm`/`wlr-randr` 是否可用
 - `/dev/uinput` 是否存在
 - 当前用户是否对 `/dev/input/event*` 有读取权限
 - `~/.local/bin/toggle-lxterminal` 是否可执行
 - Wayland 会话是不是 `wayland-0`
-
-## 用户态切屏
-
-`toggle-display` 是给 `uconsole-mapper` 用的用户态脚本：
-
-- 优先向 `uconsole-sleep` 的控制 FIFO 写入 `toggle`
-- 如果控制 FIFO 不存在，再退回 `wlopm --toggle <output>`
-- 退回 `wlopm` 时会优先用 `wlr-randr` 找当前连接的内屏输出
-- 可以通过环境变量 `WLOPM_OUTPUT` 强制指定输出名
-
-当前默认控制 FIFO 是：
-
-```bash
-/run/uconsole-sleep/toggle-display.fifo
-```
-
-`sleep_remap_powerkey.py` 现在会在启动时创建并监听这个 FIFO，所以用户态快捷键可以复用电源键短按同一套 `toggle_display()` 逻辑。
-
-uConsole 内屏常见输出名是 `DSI-2`。如果你的合成器暴露的是别的名字，先执行：
-
-```bash
-wlr-randr
-```
-
-再把 `WLOPM_OUTPUT` 改成实际输出名。
 
 ## 长按/文本绑定
 
@@ -164,6 +140,10 @@ wlr-randr
 - `repeat_ms`：触发后按住时的重复间隔，单位毫秒；默认 `0`
 - `text`：通过 `wtype` 输入一段文本
 - `press_enter`：在 `text` 后补一个回车；默认 `false`
+- `press_command`：组合键进入激活态时执行一次
+- `release_command`：组合键退出激活态时执行一次
+
+`press_command` / `release_command` 适合 push-to-talk 一类“按下开始，松开结束”的动作。它们不能和 `hold_ms`、`repeat_ms`、`text`、`emit_*` 混用。
 
 `keyboard.bindings` 额外支持：
 
@@ -177,3 +157,41 @@ wlr-randr
 - `BTN_TRIGGER` = `X`
 - `BTN_THUMB` = `A`
 - `BTN_TOP` = `Y`
+
+## 语音输入
+
+仓库里现在带了一个独立脚本 `uconsole-voice-ptt`，适合给 `uconsole-mapper` 的 `press_command` / `release_command` 调用：
+
+```toml
+[[gamepad.bindings]]
+buttons = ["BTN_THUMB2"]
+press_command = "~/.local/bin/uconsole-voice-ptt start"
+release_command = "~/.local/bin/uconsole-voice-ptt stop"
+```
+
+默认配置文件是：
+
+```bash
+~/.config/uconsole-mapper/voice.env
+```
+
+示例：
+
+```bash
+WHISPER_URL=http://127.0.0.1:9000/v1/audio/transcriptions
+VOICE_OUTPUT_MODE=type
+```
+
+脚本行为：
+
+- `start`：开始录音
+- `stop`：停止录音，上传到 Whisper，取回文本，并注入当前焦点输入框
+
+当前支持的输出模式：
+
+- `type`：直接通过 `wtype` 输入文本
+- `type_enter`：输入后再回车
+- `clipboard`：只放进剪贴板
+- `paste`：先写剪贴板，再模拟 `Ctrl+V`
+
+如果你机器上的 `B` 不是 `BTN_THUMB2`，先看服务日志或临时跑 `evtest`/`libinput debug-events` 确认实际按键码，再改配置。

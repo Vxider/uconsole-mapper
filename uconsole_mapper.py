@@ -56,6 +56,8 @@ def is_ignored_device(name: str) -> bool:
 class Binding:
     buttons: frozenset[int]
     command: str | None = None
+    press_command: str | None = None
+    release_command: str | None = None
     emit_key: int | None = None
     emit_rel: int | None = None
     emit_rel_value: int = 0
@@ -106,6 +108,8 @@ def load_config(path: Path) -> Config:
             Binding(
                 buttons=buttons,
                 command=expand_path(item["command"]) if item.get("command") else None,
+                press_command=expand_path(item["press_command"]) if item.get("press_command") else None,
+                release_command=expand_path(item["release_command"]) if item.get("release_command") else None,
                 emit_key=code_from_name(item["emit_key"]) if item.get("emit_key") else None,
                 emit_rel=code_from_name(item["emit_rel"]) if item.get("emit_rel") else None,
                 emit_rel_value=int(item.get("emit_rel_value", 0)),
@@ -123,6 +127,8 @@ def load_config(path: Path) -> Config:
             Binding(
                 buttons=buttons,
                 command=expand_path(item["command"]) if item.get("command") else None,
+                press_command=expand_path(item["press_command"]) if item.get("press_command") else None,
+                release_command=expand_path(item["release_command"]) if item.get("release_command") else None,
                 emit_key=code_from_name(item["emit_key"]) if item.get("emit_key") else None,
                 emit_rel=code_from_name(item["emit_rel"]) if item.get("emit_rel") else None,
                 emit_rel_value=int(item.get("emit_rel_value", 0)),
@@ -182,9 +188,31 @@ class ActionRunner:
             self._run_text(binding.text, binding.press_enter)
             return
 
+    def run_phase(self, binding: Binding, phase: str, debounce_ms: int) -> None:
+        command: str | None
+        if phase == "press":
+            command = binding.press_command
+        elif phase == "release":
+            command = binding.release_command
+        else:
+            raise ValueError(f"unknown phase: {phase}")
+
+        if not command:
+            return
+
+        key = f"{phase}:{','.join(str(code) for code in sorted(binding.buttons))}:{command}"
+        now = time.monotonic()
+        last = self._last_run.get(key, 0.0)
+        if (now - last) * 1000 < debounce_ms:
+            return
+        self._last_run[key] = now
+        self._run_command(command)
+
     def _binding_key(self, binding: Binding) -> str:
         if binding.command:
             return f"command:{binding.command}"
+        if binding.press_command or binding.release_command:
+            return f"phase:{binding.press_command}:{binding.release_command}"
         if binding.text is not None:
             return f"text:{binding.text}:{int(binding.press_enter)}"
         return f"emit:{binding.emit_key}"
@@ -228,7 +256,13 @@ def validate_binding(binding: Binding) -> None:
             binding.text is not None,
         )
     )
-    if action_count != 1:
+    phase_action = binding.press_command is not None or binding.release_command is not None
+    if phase_action:
+        if action_count != 0:
+            raise ValueError("phase bindings cannot be combined with command, emit_key, emit_rel, or text")
+        if binding.hold_ms != 0 or binding.repeat_ms != 0:
+            raise ValueError("phase bindings do not support hold_ms or repeat_ms")
+    elif action_count != 1:
         raise ValueError("binding must define exactly one of command, emit_key, emit_rel, or text")
     if binding.press_enter and binding.text is None:
         raise ValueError("press_enter requires text")
@@ -309,7 +343,9 @@ class GamepadWatcher:
             was_active = index in self.active_bindings
             if matched and not was_active:
                 self.active_bindings.add(index)
-                if binding.hold_ms > 0:
+                if binding.press_command is not None or binding.release_command is not None:
+                    self.runner.run_phase(binding, "press", self.config.gamepad_debounce_ms)
+                elif binding.hold_ms > 0:
                     self.hold_tasks[index] = asyncio.create_task(self._fire_hold(index, binding))
                 else:
                     self._trigger_binding(binding)
@@ -323,6 +359,8 @@ class GamepadWatcher:
                 task = self.repeat_tasks.pop(index, None)
                 if task is not None:
                     task.cancel()
+                if binding.press_command is not None or binding.release_command is not None:
+                    self.runner.run_phase(binding, "release", self.config.gamepad_debounce_ms)
 
 
 class VirtualKeyboard:
@@ -469,7 +507,7 @@ class KeyboardWatcher:
             self.virtual_keyboard.write_key(binding.emit_key, 0)
             return
         if binding.emit_rel is not None and self.virtual_mouse is not None:
-            self.virtual_mouse.write_event(ecodes.EV_REL, binding.emit_rel, binding.emit_rel_value)
+            self.virtual_mouse.write_synthetic_rel(binding.emit_rel, binding.emit_rel_value)
             self.virtual_mouse.syn()
             return
         if binding.command or binding.text is not None:
@@ -578,6 +616,20 @@ class VirtualMouse:
 
     def write_event(self, event_type: int, code: int, value: int) -> None:
         self.ui.write(event_type, code, value)
+
+    def write_synthetic_rel(self, code: int, value: int) -> None:
+        self.ui.write(ecodes.EV_REL, code, value)
+
+        hi_res_code: int | None = None
+        if code == ecodes.REL_WHEEL:
+            hi_res_code = ecodes.REL_WHEEL_HI_RES
+        elif code == ecodes.REL_HWHEEL:
+            hi_res_code = ecodes.REL_HWHEEL_HI_RES
+
+        # Mirror a physical mouse wheel "click" so stacks that prefer
+        # high-resolution wheel events still accept keyboard-driven scrolling.
+        if hi_res_code is not None:
+            self.ui.write(ecodes.EV_REL, hi_res_code, value * 120)
 
     def syn(self) -> None:
         self.ui.syn()
