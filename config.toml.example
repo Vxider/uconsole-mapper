@@ -1,0 +1,55 @@
+[general]
+rescan_seconds = 3.0
+
+[gamepad]
+device_name_patterns = ["ClockworkPI uConsole"]
+debounce_ms = 250
+
+[[gamepad.bindings]]
+buttons = ["BTN_TRIGGER"]
+command = "~/.local/bin/toggle-codex-buddy"
+
+[[gamepad.bindings]]
+buttons = ["BTN_TOP"]
+command = "~/.local/bin/toggle-lxterminal"
+
+[[gamepad.bindings]]
+buttons = ["BTN_THUMB"]
+hold_ms = 700
+text = "继续"
+press_enter = true
+
+[keyboard]
+enabled = true
+grab = true
+device_name_patterns = ["ClockworkPI uConsole Keyboard"]
+debounce_ms = 250
+
+[[keyboard.bindings]]
+buttons = ["KEY_RIGHTSHIFT", "KEY_C"]
+command = "~/.local/bin/run-or-raise-chromium"
+
+[[keyboard.bindings]]
+buttons = ["KEY_RIGHTALT", "KEY_L"]
+command = "~/.local/bin/toggle-display"
+
+[[keyboard.bindings]]
+buttons = ["KEY_LEFTCTRL", "KEY_J"]
+emit_rel = "REL_WHEEL"
+emit_rel_value = -1
+repeat_ms = 60
+
+[[keyboard.bindings]]
+buttons = ["KEY_LEFTCTRL", "KEY_K"]
+emit_rel = "REL_WHEEL"
+emit_rel_value = 1
+repeat_ms = 60
+
+[mouse]
+enabled = true
+grab = true
+device_name_patterns = []
+
+[[mouse.remaps]]
+from = "BTN_MIDDLE"
+to = "BTN_LEFT"
