@@ -1,29 +1,29 @@
 # uconsole-mapper
 
-给 uConsole / Raspberry Pi 用的输入守护进程。
+`uconsole-mapper` is an input daemon for uConsole. It maps gamepad, keyboard, and mouse events to commands, text input, or virtual input events.
 
-当前默认功能：
+## Default Features
 
-- `BTN_TRIGGER`（右侧 `X`）管理 `codex-buddy`，新开时自动全屏
-- `BTN_TOP`（你说的右侧 `Y`）管理 `QuickTerm`
-- `BTN_THUMB`（右侧 `A`）长按 `700ms` 输入 `继续` 并回车
-- `KEY_RIGHTSHIFT + KEY_C` 打开 Chromium
-- `KEY_LEFTCTRL + KEY_J/K` 映射成鼠标滚轮下/上，按住连续滚动
-- 鼠标 `BTN_MIDDLE` 映射成 `BTN_LEFT`
+- `BTN_TRIGGER` (right-side `X`) manages `codex-buddy` and makes new windows fullscreen
+- `BTN_TOP` (right-side `Y`) manages `QuickTerm`
+- `BTN_THUMB` (right-side `A`) types `继续` and presses Enter after a `700ms` hold
+- `KEY_RIGHTSHIFT + KEY_C` opens Chromium
+- `KEY_LEFTCTRL + KEY_J/K` maps to mouse wheel down/up with repeat while held
+- Mouse `BTN_MIDDLE` is remapped to `BTN_LEFT`
 
-设计上已经按“守护进程 + 配置”的方式写了，后面继续加 `right + key` 这类组合键会比继续堆 `input-remapper` 顺手很多。
+The project uses a "daemon + configuration" design, which makes it easier to add combo bindings or custom actions than continuing to stack more `input-remapper` rules.
 
-## 文件
+## Files
 
-- `uconsole_mapper.py`：主程序
-- `config.toml.example`：默认配置
-- `uconsole-mapper.service`：`systemd --user` 服务
-- `99-uinput.rules`：给 `input` 组开放 `/dev/uinput`
-- `install.sh`：安装脚本
+- `uconsole_mapper.py`: main program
+- `config.toml.example`: example configuration
+- `uconsole-mapper.service`: `systemd --user` service file
+- `99-uinput.rules`: grants `/dev/uinput` access to the `input` group
+- `install.sh`: installation script
 
-## 在 Pi 上安装
+## Installation
 
-先把这个目录同步到 Pi，然后执行：
+Sync this repository to the uConsole, then run:
 
 ```bash
 sudo apt update
@@ -33,15 +33,15 @@ cd ~/WorkSpace/uconsole-mapper
 ./install.sh
 ```
 
-## 配置
+## Configuration
 
-默认配置安装到：
+Default configuration file path:
 
 ```bash
 ~/.config/uconsole-mapper/config.toml
 ```
 
-默认内容：
+Default configuration example:
 
 ```toml
 [general]
@@ -104,63 +104,63 @@ from = "BTN_MIDDLE"
 to = "BTN_LEFT"
 ```
 
-## 调试
+## Debugging
 
 ```bash
 systemctl --user status uconsole-mapper.service
 journalctl --user -u uconsole-mapper.service -f
 ```
 
-`toggle-codex-buddy` 现在的行为是：
+Current `toggle-codex-buddy` behavior:
 
-- 没有 `codex-buddy` 窗口：打开一个新的 `codex-buddy uConsole`，然后切成全屏
-- 有 `codex-buddy` 窗口但不在前台：切到前台
-- `codex-buddy` 已在前台：最小化隐藏
+- No `codex-buddy` window: opens a new `codex-buddy uConsole` window and switches it to fullscreen
+- A `codex-buddy` window exists but is not focused: raises it to the foreground
+- `codex-buddy` is already focused: minimizes or hides it
 
-`toggle-lxterminal` 现在的行为是：
+Current `toggle-lxterminal` behavior:
 
-- 没有 `QuickTerm` 窗口：打开一个新的 `lxterminal --title=QuickTerm`
-- 有 `QuickTerm` 窗口但不在前台：切到前台
-- `QuickTerm` 已在前台：最小化隐藏
+- No `QuickTerm` window: opens a new `lxterminal --title=QuickTerm`
+- A `QuickTerm` window exists but is not focused: raises it to the foreground
+- `QuickTerm` is already focused: minimizes or hides it
 
-如果服务起不来，优先检查：
+If the service does not start, check these first:
 
-- `python3-evdev` 是否已安装
-- 使用文本输入绑定时，`wtype` 是否已安装
-- `/dev/uinput` 是否存在
-- 当前用户是否对 `/dev/input/event*` 有读取权限
-- `~/.local/bin/toggle-lxterminal` 是否可执行
-- Wayland 会话是不是 `wayland-0`
+- Whether `python3-evdev` is installed
+- Whether `wtype` is installed when text-input bindings are used
+- Whether `/dev/uinput` exists
+- Whether the current user has read access to `/dev/input/event*`
+- Whether `~/.local/bin/toggle-lxterminal` is executable
+- Whether the Wayland session is `wayland-0`
 
-## 长按/文本绑定
+## Hold And Text Bindings
 
-`gamepad.bindings` 现在额外支持：
+`gamepad.bindings` also supports these fields:
 
-- `hold_ms`：按住多久后触发，单位毫秒；默认 `0`
-- `repeat_ms`：触发后按住时的重复间隔，单位毫秒；默认 `0`
-- `text`：通过 `wtype` 输入一段文本
-- `press_enter`：在 `text` 后补一个回车；默认 `false`
-- `press_command`：组合键进入激活态时执行一次
-- `release_command`：组合键退出激活态时执行一次
+- `hold_ms`: delay before triggering while held, in milliseconds; default `0`
+- `repeat_ms`: repeat interval while held after triggering, in milliseconds; default `0`
+- `text`: types a string through `wtype`
+- `press_enter`: sends Enter after `text`; default `false`
+- `press_command`: runs once when the combo becomes active
+- `release_command`: runs once when the combo becomes inactive
 
-`press_command` / `release_command` 适合 push-to-talk 一类“按下开始，松开结束”的动作。它们不能和 `hold_ms`、`repeat_ms`、`text`、`emit_*` 混用。
+`press_command` / `release_command` are intended for push-to-talk style actions where press starts and release stops. They cannot be combined with `hold_ms`, `repeat_ms`, `text`, or `emit_*`.
 
-`keyboard.bindings` 额外支持：
+`keyboard.bindings` also supports these fields:
 
-- `emit_rel` + `emit_rel_value`：发送鼠标相对事件，比如滚轮
-- `repeat_ms`：触发后按住时的重复间隔，单位毫秒；默认 `0`
-- `text`：通过 `wtype` 输入一段文本
-- `press_enter`：在 `text` 后补一个回车；默认 `false`
+- `emit_rel` + `emit_rel_value`: sends relative mouse events such as wheel scrolling
+- `repeat_ms`: repeat interval while held after triggering, in milliseconds; default `0`
+- `text`: types a string through `wtype`
+- `press_enter`: sends Enter after `text`; default `false`
 
-对 uConsole 这组右侧按键，当前按键码按实机映射为：
+Current right-side button mapping on uConsole:
 
 - `BTN_TRIGGER` = `X`
 - `BTN_THUMB` = `A`
 - `BTN_TOP` = `Y`
 
-## 语音输入
+## Voice Input
 
-仓库里现在带了一个独立脚本 `uconsole-voice-ptt`，适合给 `uconsole-mapper` 的 `press_command` / `release_command` 调用：
+The repository includes a standalone script, `uconsole-voice-ptt`, intended to be called from `uconsole-mapper` via `press_command` / `release_command`:
 
 ```toml
 [[gamepad.bindings]]
@@ -169,29 +169,29 @@ press_command = "~/.local/bin/uconsole-voice-ptt start"
 release_command = "~/.local/bin/uconsole-voice-ptt stop"
 ```
 
-默认配置文件是：
+Default configuration file path:
 
 ```bash
 ~/.config/uconsole-mapper/voice.env
 ```
 
-示例：
+Example:
 
 ```bash
 WHISPER_URL=http://127.0.0.1:9000/v1/audio/transcriptions
 VOICE_OUTPUT_MODE=type
 ```
 
-脚本行为：
+Script behavior:
 
-- `start`：开始录音
-- `stop`：停止录音，上传到 Whisper，取回文本，并注入当前焦点输入框
+- `start`: starts recording
+- `stop`: stops recording, uploads the audio to Whisper, retrieves the transcript, and injects it into the currently focused input field
 
-当前支持的输出模式：
+Supported output modes:
 
-- `type`：直接通过 `wtype` 输入文本
-- `type_enter`：输入后再回车
-- `clipboard`：只放进剪贴板
-- `paste`：先写剪贴板，再模拟 `Ctrl+V`
+- `type`: types the text directly through `wtype`
+- `type_enter`: types the text and then presses Enter
+- `clipboard`: writes only to the clipboard
+- `paste`: writes to the clipboard first, then simulates `Ctrl+V`
 
-如果你机器上的 `B` 不是 `BTN_THUMB2`，先看服务日志或临时跑 `evtest`/`libinput debug-events` 确认实际按键码，再改配置。
+If the `B` button on the device is not `BTN_THUMB2`, check the service logs or temporarily run `evtest` / `libinput debug-events` to confirm the actual key code before updating the configuration.
