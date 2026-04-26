@@ -38,18 +38,6 @@ repeat_delay_ms = 300
 buttons = ["KEY_RIGHTSHIFT", "KEY_C"]
 command = "~/.local/bin/run-or-raise-chromium"
 
-[[keyboard.bindings]]
-buttons = ["KEY_LEFTCTRL", "KEY_J"]
-emit_rel = "REL_WHEEL"
-emit_rel_value = -1
-repeat_ms = 60
-
-[[keyboard.bindings]]
-buttons = ["KEY_LEFTCTRL", "KEY_K"]
-emit_rel = "REL_WHEEL"
-emit_rel_value = 1
-repeat_ms = 60
-
 [mouse]
 enabled = true
 grab = true

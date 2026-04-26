@@ -8,7 +8,6 @@
 - `BTN_TOP` (right-side `Y`) manages `QuickTerm`
 - `BTN_THUMB` (right-side `A`) types `继续` and presses Enter after a `700ms` hold
 - `KEY_RIGHTSHIFT + KEY_C` opens Chromium
-- `KEY_LEFTCTRL + KEY_J/K` maps to mouse wheel down/up with repeat while held
 - Mouse `BTN_MIDDLE` is remapped to `BTN_LEFT`
 
 The project uses a "daemon + configuration" design, which makes it easier to add combo bindings or custom actions than continuing to stack more `input-remapper` rules.
@@ -83,18 +82,6 @@ repeat_delay_ms = 300
 [[keyboard.bindings]]
 buttons = ["KEY_RIGHTSHIFT", "KEY_C"]
 command = "~/.local/bin/run-or-raise-chromium"
-
-[[keyboard.bindings]]
-buttons = ["KEY_LEFTCTRL", "KEY_J"]
-emit_rel = "REL_WHEEL"
-emit_rel_value = -1
-repeat_ms = 60
-
-[[keyboard.bindings]]
-buttons = ["KEY_LEFTCTRL", "KEY_K"]
-emit_rel = "REL_WHEEL"
-emit_rel_value = 1
-repeat_ms = 60
 
 [mouse]
 enabled = true
