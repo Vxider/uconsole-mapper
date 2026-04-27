@@ -394,8 +394,8 @@ class VirtualKeyboard:
             bustype=device.info.bustype,
             phys=f"{device.phys or 'uconsole'}/virtual",
         )
-        # Keep repeat settings explicit so held keys repeat globally even when
-        # the physical keyboard is grabbed and re-emitted through uinput.
+        # Keep repeat settings explicit so held keys repeat even when the
+        # physical keyboard is grabbed and re-emitted through uinput.
         try:
             self.ui.device.repeat = (repeat_delay_ms, repeat_rate)
         except (AttributeError, OSError) as exc:
@@ -559,8 +559,9 @@ class KeyboardWatcher:
             if code in self.consumed_keys:
                 return
             if code in self.pending_set:
+                # Let the virtual keyboard own autorepeat once a pending key
+                # is disambiguated, instead of replaying hardware repeats.
                 self._flush_pending()
-            self.virtual_keyboard.write_key(code, 1)
             return
 
         is_pressed = value != 0
