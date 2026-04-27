@@ -113,12 +113,14 @@ Current `toggle-codex-buddy` behavior:
 - No `codex-buddy` window: opens a new `codex-buddy uConsole` window and switches it to fullscreen
 - A `codex-buddy` window exists but is not focused: raises it to the foreground
 - `codex-buddy` is already focused: minimizes or hides it
+- `codex-buddy` loses focus: minimizes automatically so it does not remain behind other overlay windows
 
 Current `toggle-lxterminal` behavior:
 
 - No `QuickTerm` window: opens a new `lxterminal --title=QuickTerm`
 - A `QuickTerm` window exists but is not focused: raises it to the foreground
 - `QuickTerm` is already focused: minimizes or hides it
+- `QuickTerm` loses focus: minimizes automatically so the next toggle returns to the desktop
 
 If the service does not start, check these first:
 
