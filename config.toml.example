@@ -21,6 +21,9 @@ press_enter = true
 
 # Push-to-talk voice input.
 # Replace BTN_THUMB2 with the actual B key code on your device if needed.
+# When the focused input is a tmux terminal window, the voice script will
+# automatically send the current active tmux pane visible text as correction context,
+# or fall back to recent lines when the visible area is too short.
 # [[gamepad.bindings]]
 # buttons = ["BTN_THUMB2"]
 # press_command = "~/.local/bin/uconsole-voice-ptt start"

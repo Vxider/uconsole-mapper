@@ -183,14 +183,33 @@ Default configuration file path:
 Example:
 
 ```bash
-WHISPER_URL=http://127.0.0.1:9000/v1/audio/transcriptions
+WHISPER_URL=http://127.0.0.1:3300/api/asr/transcriptions
 VOICE_OUTPUT_MODE=type
+```
+
+Optional context-related variables:
+
+```bash
+# Optional short ASR hint sent to the upstream transcription model.
+# WHISPER_PROMPT=
+# Multipart field name for the ASR prompt. Defaults to prompt.
+# WHISPER_PROMPT_FIELD=prompt
+# Multipart field name for tmux context sent to correction. Defaults to contextText.
+# WHISPER_CONTEXT_FIELD=contextText
+# Ask the ASR service to run correction. Defaults to 1.
+# WHISPER_ENABLE_CORRECTION=1
+# Include the current tmux active pane visible text when a tmux terminal is focused.
+VOICE_TMUX_CONTEXT=1
+# If the visible area is too short, fall back to at least this many recent lines.
+# VOICE_TMUX_CONTEXT_LINES=30
+# VOICE_TMUX_CONTEXT_MAX_CHARS=1200
 ```
 
 Script behavior:
 
 - `start`: starts recording
 - `stop`: stops recording, uploads the audio to Whisper, retrieves the transcript, and injects it into the currently focused input field
+- if the focused input is a tmux terminal window, the script captures the current active tmux pane visible text; if that is shorter than the minimum line budget, it falls back to the most recent lines before sending the context multipart field for correction
 
 Supported output modes:
 
