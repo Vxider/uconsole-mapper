@@ -83,6 +83,14 @@ repeat_delay_ms = 300
 buttons = ["KEY_RIGHTSHIFT", "KEY_C"]
 command = "~/.local/bin/run-or-raise-chromium"
 
+[[keyboard.bindings]]
+buttons = ["KEY_LEFTSHIFT", "KEY_ENTER"]
+command = "~/.local/bin/shift-enter-newline"
+
+[[keyboard.bindings]]
+buttons = ["KEY_RIGHTSHIFT", "KEY_ENTER"]
+command = "~/.local/bin/shift-enter-newline"
+
 [mouse]
 enabled = true
 grab = true
@@ -142,6 +150,10 @@ If the service does not start, check these first:
 - `repeat_ms`: repeat interval while held after triggering, in milliseconds; default `0`
 - `text`: types a string through `wtype`
 - `press_enter`: sends Enter after `text`; default `false`
+
+The included `shift-enter-newline` helper translates `Shift+Enter` into `Ctrl+J`
+when `QuickTerm` is focused. This matches Codex CLI multiline input behavior in
+terminal UIs, where plain `Shift+Enter` is often not exposed as a distinct key.
 
 Current right-side button mapping on uConsole:
 

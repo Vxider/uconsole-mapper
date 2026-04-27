@@ -38,6 +38,14 @@ repeat_delay_ms = 300
 buttons = ["KEY_RIGHTSHIFT", "KEY_C"]
 command = "~/.local/bin/run-or-raise-chromium"
 
+[[keyboard.bindings]]
+buttons = ["KEY_LEFTSHIFT", "KEY_ENTER"]
+command = "~/.local/bin/shift-enter-newline"
+
+[[keyboard.bindings]]
+buttons = ["KEY_RIGHTSHIFT", "KEY_ENTER"]
+command = "~/.local/bin/shift-enter-newline"
+
 [mouse]
 enabled = true
 grab = true
