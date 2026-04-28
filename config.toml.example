@@ -1,5 +1,7 @@
 [general]
 rescan_seconds = 3.0
+session_watch_processes = ["wf-panel-pi", "labwc"]
+session_watch_settle_ms = 1500
 
 [gamepad]
 device_name_patterns = ["ClockworkPI uConsole"]
@@ -30,24 +32,29 @@ press_enter = true
 # release_command = "~/.local/bin/uconsole-voice-ptt stop"
 
 [keyboard]
-enabled = true
-grab = true
+enabled = false
+grab = false
 device_name_patterns = ["ClockworkPI uConsole Keyboard"]
 debounce_ms = 250
-repeat_rate = 30
-repeat_delay_ms = 300
 
-[[keyboard.bindings]]
-buttons = ["KEY_RIGHTSHIFT", "KEY_C"]
-command = "~/.local/bin/run-or-raise-chromium"
-
-[[keyboard.bindings]]
-buttons = ["KEY_LEFTSHIFT", "KEY_ENTER"]
-command = "~/.local/bin/shift-enter-newline"
-
-[[keyboard.bindings]]
-buttons = ["KEY_RIGHTSHIFT", "KEY_ENTER"]
-command = "~/.local/bin/shift-enter-newline"
+# Legacy keyboard interception mode is available, but disabled by default.
+# Prefer keyd + labwc for keyboard shortcuts so normal typing does not depend
+# on the mapper's virtual keyboard bridge.
+# Default desktop path:
+#   RightShift+C -> keyd emits F20 -> labwc runs run-or-raise-chromium
+# Uncomment the examples below only if you intentionally want the mapper to
+# own those keyboard combos again.
+# repeat_rate = 30
+# repeat_delay_ms = 300
+# [[keyboard.bindings]]
+# buttons = ["KEY_RIGHTSHIFT", "KEY_C"]
+# command = "~/.local/bin/run-or-raise-chromium"
+# [[keyboard.bindings]]
+# buttons = ["KEY_LEFTSHIFT", "KEY_ENTER"]
+# command = "~/.local/bin/shift-enter-newline"
+# [[keyboard.bindings]]
+# buttons = ["KEY_RIGHTSHIFT", "KEY_ENTER"]
+# command = "~/.local/bin/shift-enter-newline"
 
 [mouse]
 enabled = true

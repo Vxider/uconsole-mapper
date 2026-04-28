@@ -49,8 +49,12 @@ fi
 install -m 0755 "${SCRIPT_DIR}/uconsole_mapper.py" "${APP_DIR}/uconsole_mapper.py"
 install -m 0755 "${SCRIPT_DIR}/toggle-codex-buddy.sh" "${BIN_DIR}/toggle-codex-buddy"
 install -m 0755 "${SCRIPT_DIR}/toggle-lxterminal.sh" "${BIN_DIR}/toggle-lxterminal"
+install -m 0755 "${SCRIPT_DIR}/run-or-raise-chromium.sh" "${BIN_DIR}/run-or-raise-chromium"
 install -m 0755 "${SCRIPT_DIR}/shift-enter-newline.sh" "${BIN_DIR}/shift-enter-newline"
 install -m 0755 "${SCRIPT_DIR}/uconsole-voice-ptt.sh" "${BIN_DIR}/uconsole-voice-ptt"
+install -m 0755 "${SCRIPT_DIR}/sync_labwc_keybinds.py" "${APP_DIR}/sync_labwc_keybinds.py"
+install -m 0755 "${SCRIPT_DIR}/sync_keyd_default_conf.py" "${APP_DIR}/sync_keyd_default_conf.py"
+install -m 0644 "${SCRIPT_DIR}/keyd-uconsole-mapper" "${APP_DIR}/keyd-uconsole-mapper"
 install -m 0644 "${SCRIPT_DIR}/uconsole-mapper.service" "${SYSTEMD_DIR}/uconsole-mapper.service"
 
 if [[ ! -f "${CONFIG_DIR}/config.toml" ]]; then
@@ -60,6 +64,20 @@ if [[ ! -f "${CONFIG_DIR}/voice.env" ]]; then
   install -m 0644 "${SCRIPT_DIR}/voice.env.example" "${CONFIG_DIR}/voice.env"
 fi
 
+"${PYTHON_BIN}" "${APP_DIR}/sync_labwc_keybinds.py"
+if command -v labwc >/dev/null 2>&1; then
+  labwc --reconfigure >/dev/null 2>&1 || true
+fi
+
+if command -v keyd >/dev/null 2>&1 || [[ -d /etc/keyd ]]; then
+  sudo install -d -m 0755 /etc/keyd
+  sudo install -m 0644 "${APP_DIR}/keyd-uconsole-mapper" /etc/keyd/uconsole-mapper
+  sudo "${PYTHON_BIN}" "${APP_DIR}/sync_keyd_default_conf.py"
+  if command -v keyd >/dev/null 2>&1; then
+    sudo keyd reload >/dev/null 2>&1 || sudo systemctl restart keyd >/dev/null 2>&1 || true
+  fi
+fi
+
 systemctl --user daemon-reload
 systemctl --user enable --now uconsole-mapper.service
 systemctl --user restart uconsole-mapper.service
@@ -67,5 +85,13 @@ systemctl --user restart uconsole-mapper.service
 echo
 echo "Installed uconsole-mapper."
 echo "Config:   ${CONFIG_DIR}/config.toml"
+echo "Labwc:    ~/.config/labwc/rc.xml"
+echo "Keyd:     /etc/keyd/default.conf -> include uconsole-mapper"
 echo "Service:  systemctl --user status uconsole-mapper.service"
 echo "Logs:     journalctl --user -u uconsole-mapper.service -f"
+echo
+if ! command -v keyd >/dev/null 2>&1 && [[ ! -d /etc/keyd ]]; then
+  echo "RightShift+C requires keyd. Install keyd, then rerun ./install.sh to wire /etc/keyd/default.conf."
+fi
+echo "Keyboard shortcuts now prefer keyd + labwc."
+echo "If ${CONFIG_DIR}/config.toml still has [keyboard] enabled, disable that legacy mode to avoid keyboard grab failures."

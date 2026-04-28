@@ -1,13 +1,13 @@
 # uconsole-mapper
 
-`uconsole-mapper` is an input daemon for uConsole. It maps gamepad, keyboard, and mouse events to commands, text input, or virtual input events.
+`uconsole-mapper` is an input daemon for uConsole. It maps gamepad and mouse events to commands, text input, or virtual input events, and it can still handle keyboard interception in a legacy compatibility mode.
 
 ## Default Features
 
 - `BTN_TRIGGER` (right-side `X`) manages `codex-buddy` and makes new windows fullscreen
 - `BTN_TOP` (right-side `Y`) manages `QuickTerm`
 - `BTN_THUMB` (right-side `A`) types `继续` and presses Enter after a `700ms` hold
-- `KEY_RIGHTSHIFT + KEY_C` opens Chromium
+- Desktop keybind integration keeps `RightShift+C` for Chromium through `keyd -> F20 -> labwc`, and installs `Shift+Enter` for terminal-style multiline input
 - Mouse `BTN_MIDDLE` is remapped to `BTN_LEFT`
 
 The project uses a "daemon + configuration" design, which makes it easier to add combo bindings or custom actions than continuing to stack more `input-remapper` rules.
@@ -16,6 +16,10 @@ The project uses a "daemon + configuration" design, which makes it easier to add
 
 - `uconsole_mapper.py`: main program
 - `config.toml.example`: example configuration
+- `run-or-raise-chromium.sh`: raises an existing Chromium window or starts a new one
+- `keyd-uconsole-mapper`: modular `keyd` snippet for `RightShift+C -> F20`
+- `sync_labwc_keybinds.py`: installs compositor-side keyboard shortcuts into `labwc`
+- `sync_keyd_default_conf.py`: installs the `keyd` include into `/etc/keyd/default.conf`
 - `uconsole-mapper.service`: `systemd --user` service file
 - `99-uinput.rules`: grants `/dev/uinput` access to the `input` group
 - `install.sh`: installation script
@@ -32,6 +36,10 @@ cd ~/WorkSpace/uconsole-mapper
 ./install.sh
 ```
 
+`RightShift+C` now depends on `keyd`. If your distro packages it, install
+`keyd` before running `./install.sh`; the installer will then wire
+`/etc/keyd/default.conf` automatically.
+
 ## Configuration
 
 Default configuration file path:
@@ -45,6 +53,8 @@ Default configuration example:
 ```toml
 [general]
 rescan_seconds = 3.0
+session_watch_processes = ["wf-panel-pi", "labwc"]
+session_watch_settle_ms = 1500
 
 [gamepad]
 device_name_patterns = ["ClockworkPI uConsole"]
@@ -72,24 +82,10 @@ press_enter = true
 # release_command = "~/.local/bin/uconsole-voice-ptt stop"
 
 [keyboard]
-enabled = true
-grab = true
+enabled = false
+grab = false
 device_name_patterns = ["ClockworkPI uConsole Keyboard"]
 debounce_ms = 250
-repeat_rate = 30
-repeat_delay_ms = 300
-
-[[keyboard.bindings]]
-buttons = ["KEY_RIGHTSHIFT", "KEY_C"]
-command = "~/.local/bin/run-or-raise-chromium"
-
-[[keyboard.bindings]]
-buttons = ["KEY_LEFTSHIFT", "KEY_ENTER"]
-command = "~/.local/bin/shift-enter-newline"
-
-[[keyboard.bindings]]
-buttons = ["KEY_RIGHTSHIFT", "KEY_ENTER"]
-command = "~/.local/bin/shift-enter-newline"
 
 [mouse]
 enabled = true
@@ -156,6 +152,35 @@ If the service does not start, check these first:
 The included `shift-enter-newline` helper translates `Shift+Enter` into `Ctrl+J`
 when `QuickTerm` is focused. This matches Codex CLI multiline input behavior in
 terminal UIs, where plain `Shift+Enter` is often not exposed as a distinct key.
+
+## Desktop Keybinds
+
+By default, keyboard shortcuts are no longer routed through `uconsole-mapper`.
+Normal typing stays on the physical keyboard path, while desktop shortcuts are
+split across `keyd` and `labwc`.
+
+Managed default keybinds:
+
+- `RightShift+C`: `keyd` emits `F20`, then `labwc` runs `~/.local/bin/run-or-raise-chromium`
+- `Shift+Enter`: `labwc` runs `~/.local/bin/shift-enter-newline`
+
+`install.sh` installs these pieces:
+
+- `~/.config/labwc/rc.xml`: `sync_labwc_keybinds.py` manages `F20` and `Shift+Enter`
+- `/etc/keyd/uconsole-mapper`: modular `keyd` snippet containing the `RightShift+C -> F20` remap
+- `/etc/keyd/default.conf`: `sync_keyd_default_conf.py` inserts `include uconsole-mapper`
+
+This split is intentional. `labwc` keybinds can safely express `F20` and
+`Shift+Enter`, but they cannot safely express a right-only Shift modifier for
+`C`. `keyd` handles the side-specific remap first, so `labwc` only sees the
+rare function key.
+
+If you do not want this on every keyboard, move `include uconsole-mapper` from
+`/etc/keyd/default.conf` into a device-specific `keyd` config instead.
+
+Legacy `[keyboard]` interception mode still exists for compatibility, but it is
+disabled in the example config because it puts normal typing on top of the
+mapper's grab-and-reemit path.
 
 Current right-side button mapping on uConsole:
 
@@ -236,3 +261,5 @@ If the `B` button on the device is not `BTN_THUMB2`, check the service logs or t
 - `uconsole-mapper.service` uses `Restart=always`, so systemd restarts the daemon if the main process exits
 - if a keyboard watcher task dies unexpectedly, the daemon now treats that as fatal and lets systemd restart the whole service immediately
 - if keyboard grab is enabled but the virtual keyboard write path breaks at runtime, the keyboard watcher drops out of grab mode and falls back to direct passthrough instead of keeping the physical keyboard locked
+- by default the daemon also watches `wf-panel-pi` and `labwc`; if either process restarts and the PID change stays stable for `1500ms`, the daemon exits so systemd can recreate the virtual keyboard path cleanly
+- the default desktop shortcut path no longer depends on `uconsole-mapper`, so taskbar or compositor churn no longer takes normal typing or `RightShift+C` down with it

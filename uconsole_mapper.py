@@ -76,6 +76,8 @@ class MouseRemap:
 @dataclass(slots=True)
 class Config:
     rescan_seconds: float
+    session_watch_processes: list[str]
+    session_watch_settle_ms: int
     gamepad_patterns: list[str]
     gamepad_debounce_ms: int
     gamepad_bindings: list[Binding]
@@ -162,6 +164,8 @@ def load_config(path: Path) -> Config:
 
     return Config(
         rescan_seconds=float(general.get("rescan_seconds", 3.0)),
+        session_watch_processes=list(general.get("session_watch_processes", ["wf-panel-pi", "labwc"])),
+        session_watch_settle_ms=int(general.get("session_watch_settle_ms", 1500)),
         gamepad_patterns=list(gamepad.get("device_name_patterns", ["ClockworkPI uConsole"])),
         gamepad_debounce_ms=int(gamepad.get("debounce_ms", 250)),
         gamepad_bindings=bindings,
@@ -795,6 +799,8 @@ class MapperDaemon:
         self.runner = ActionRunner()
         self.virtual_mouse = VirtualMouse() if config.mouse_enabled else None
         self.tasks: dict[str, DeviceTask] = {}
+        self.session_watch_baselines: dict[str, frozenset[int]] = {}
+        self.session_watch_pending: dict[str, tuple[frozenset[int], float]] = {}
 
     async def shutdown(self) -> None:
         for entry in list(self.tasks.values()):
@@ -809,6 +815,7 @@ class MapperDaemon:
         while True:
             self._prune_tasks()
             self._scan_devices()
+            self._check_session_watch()
             await asyncio.sleep(self.config.rescan_seconds)
 
     def _prune_tasks(self) -> None:
@@ -854,6 +861,66 @@ class MapperDaemon:
                 self.tasks[path] = DeviceTask(role=role, task=task)
             else:
                 device.close()
+
+    def _check_session_watch(self) -> None:
+        if not self.config.keyboard_grab:
+            return
+        if not self.config.session_watch_processes:
+            return
+
+        now = time.monotonic()
+        for raw_pattern in self.config.session_watch_processes:
+            pattern = raw_pattern.strip().lower()
+            if not pattern:
+                continue
+            current = self._matching_process_pids(pattern)
+            baseline = self.session_watch_baselines.get(pattern)
+            if baseline is None:
+                if current:
+                    self.session_watch_baselines[pattern] = current
+                continue
+
+            if current == baseline:
+                self.session_watch_pending.pop(pattern, None)
+                continue
+
+            pending = self.session_watch_pending.get(pattern)
+            if pending is None or pending[0] != current:
+                LOGGER.warning(
+                    "session watchdog: observed %s process change %s -> %s; waiting %sms before recovery",
+                    pattern,
+                    sorted(baseline),
+                    sorted(current),
+                    self.config.session_watch_settle_ms,
+                )
+                self.session_watch_pending[pattern] = (current, now)
+                continue
+
+            if (now - pending[1]) * 1000 < self.config.session_watch_settle_ms:
+                continue
+
+            raise RuntimeError(
+                f"session process changed for {pattern}: {sorted(baseline)} -> {sorted(current)}"
+            )
+
+    def _matching_process_pids(self, pattern: str) -> frozenset[int]:
+        matches: set[int] = set()
+        proc_root = Path("/proc")
+        for entry in proc_root.iterdir():
+            if not entry.name.isdigit():
+                continue
+            pid = int(entry.name)
+            try:
+                comm = (entry / "comm").read_text(encoding="utf-8", errors="ignore").strip().lower()
+                if pattern in comm:
+                    matches.add(pid)
+                    continue
+                cmdline = (entry / "cmdline").read_bytes().replace(b"\0", b" ").decode("utf-8", errors="ignore").lower()
+                if pattern in cmdline:
+                    matches.add(pid)
+            except OSError:
+                continue
+        return frozenset(matches)
 
     def _detect_role(self, device: InputDevice) -> str | None:
         if is_ignored_device(device.name):
@@ -925,6 +992,10 @@ async def main_async() -> int:
         return 1
 
     config = load_config(config_path)
+    if config.keyboard_enabled and config.keyboard_grab:
+        LOGGER.warning(
+            "legacy keyboard grab mode is enabled; prefer keyd plus labwc so normal typing stays off the mapper path"
+        )
     daemon = MapperDaemon(config)
 
     loop = asyncio.get_running_loop()
