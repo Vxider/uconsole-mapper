@@ -1,7 +1,0 @@
-# Included from /etc/keyd/default.conf or a device-specific keyd config.
-# Keep RightShift behaving like Shift, except RightShift+C emits F20.
-[main]
-rightshift = layer(uconsole_rightshift)
-
-[uconsole_rightshift:S]
-c = f20

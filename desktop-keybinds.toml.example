@@ -1,0 +1,40 @@
+# Declarative desktop shortcut config.
+# The generator assigns bridge keysyms automatically for RightShift bindings,
+# then emits matching keyd and labwc snippets.
+
+[keyd]
+# Safe default pool. xkbcommon documents F13-F35, which gives 23 bridge slots.
+# Override only if you have verified additional rare keysyms on your system.
+bridge_keysyms = [
+  "F13",
+  "F14",
+  "F15",
+  "F16",
+  "F17",
+  "F18",
+  "F19",
+  "F20",
+  "F21",
+  "F22",
+  "F23",
+  "F24",
+  "F25",
+  "F26",
+  "F27",
+  "F28",
+  "F29",
+  "F30",
+  "F31",
+  "F32",
+  "F33",
+  "F34",
+  "F35",
+]
+
+[[rightshift.bindings]]
+key = "c"
+command = "~/.local/bin/run-or-raise-chromium"
+
+[[labwc.bindings]]
+key = "S-Return"
+command = "~/.local/bin/shift-enter-newline"

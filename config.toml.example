@@ -40,8 +40,8 @@ debounce_ms = 250
 # Legacy keyboard interception mode is available, but disabled by default.
 # Prefer keyd + labwc for keyboard shortcuts so normal typing does not depend
 # on the mapper's virtual keyboard bridge.
-# Default desktop path:
-#   RightShift+C -> keyd emits F20 -> labwc runs run-or-raise-chromium
+# Desktop launcher bindings now live in:
+#   ~/.config/uconsole-mapper/desktop-keybinds.toml
 # Uncomment the examples below only if you intentionally want the mapper to
 # own those keyboard combos again.
 # repeat_rate = 30

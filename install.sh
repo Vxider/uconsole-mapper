@@ -52,9 +52,9 @@ install -m 0755 "${SCRIPT_DIR}/toggle-lxterminal.sh" "${BIN_DIR}/toggle-lxtermin
 install -m 0755 "${SCRIPT_DIR}/run-or-raise-chromium.sh" "${BIN_DIR}/run-or-raise-chromium"
 install -m 0755 "${SCRIPT_DIR}/shift-enter-newline.sh" "${BIN_DIR}/shift-enter-newline"
 install -m 0755 "${SCRIPT_DIR}/uconsole-voice-ptt.sh" "${BIN_DIR}/uconsole-voice-ptt"
+install -m 0755 "${SCRIPT_DIR}/generate_desktop_keybinds.py" "${APP_DIR}/generate_desktop_keybinds.py"
 install -m 0755 "${SCRIPT_DIR}/sync_labwc_keybinds.py" "${APP_DIR}/sync_labwc_keybinds.py"
 install -m 0755 "${SCRIPT_DIR}/sync_keyd_default_conf.py" "${APP_DIR}/sync_keyd_default_conf.py"
-install -m 0644 "${SCRIPT_DIR}/keyd-uconsole-mapper" "${APP_DIR}/keyd-uconsole-mapper"
 install -m 0644 "${SCRIPT_DIR}/uconsole-mapper.service" "${SYSTEMD_DIR}/uconsole-mapper.service"
 
 if [[ ! -f "${CONFIG_DIR}/config.toml" ]]; then
@@ -63,7 +63,11 @@ fi
 if [[ ! -f "${CONFIG_DIR}/voice.env" ]]; then
   install -m 0644 "${SCRIPT_DIR}/voice.env.example" "${CONFIG_DIR}/voice.env"
 fi
+if [[ ! -f "${CONFIG_DIR}/desktop-keybinds.toml" ]]; then
+  install -m 0644 "${SCRIPT_DIR}/desktop-keybinds.toml.example" "${CONFIG_DIR}/desktop-keybinds.toml"
+fi
 
+"${PYTHON_BIN}" "${APP_DIR}/generate_desktop_keybinds.py" --config "${CONFIG_DIR}/desktop-keybinds.toml"
 "${PYTHON_BIN}" "${APP_DIR}/sync_labwc_keybinds.py"
 if command -v labwc >/dev/null 2>&1; then
   labwc --reconfigure >/dev/null 2>&1 || true
@@ -85,6 +89,7 @@ systemctl --user restart uconsole-mapper.service
 echo
 echo "Installed uconsole-mapper."
 echo "Config:   ${CONFIG_DIR}/config.toml"
+echo "Hotkeys:  ${CONFIG_DIR}/desktop-keybinds.toml"
 echo "Labwc:    ~/.config/labwc/rc.xml"
 echo "Keyd:     /etc/keyd/default.conf -> include uconsole-mapper"
 echo "Service:  systemctl --user status uconsole-mapper.service"

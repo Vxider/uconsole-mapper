@@ -7,7 +7,7 @@
 - `BTN_TRIGGER` (right-side `X`) manages `codex-buddy` and makes new windows fullscreen
 - `BTN_TOP` (right-side `Y`) manages `QuickTerm`
 - `BTN_THUMB` (right-side `A`) types `继续` and presses Enter after a `700ms` hold
-- Desktop keybind integration keeps `RightShift+C` for Chromium through `keyd -> F20 -> labwc`, and installs `Shift+Enter` for terminal-style multiline input
+- Desktop keybind integration keeps `RightShift+C` for Chromium through generated `keyd -> bridge keysym -> labwc` bindings, and installs `Shift+Enter` for terminal-style multiline input
 - Mouse `BTN_MIDDLE` is remapped to `BTN_LEFT`
 
 The project uses a "daemon + configuration" design, which makes it easier to add combo bindings or custom actions than continuing to stack more `input-remapper` rules.
@@ -16,8 +16,9 @@ The project uses a "daemon + configuration" design, which makes it easier to add
 
 - `uconsole_mapper.py`: main program
 - `config.toml.example`: example configuration
+- `desktop-keybinds.toml.example`: declarative desktop shortcut config
+- `generate_desktop_keybinds.py`: generates `keyd` and `labwc` snippets from the desktop shortcut config
 - `run-or-raise-chromium.sh`: raises an existing Chromium window or starts a new one
-- `keyd-uconsole-mapper`: modular `keyd` snippet for `RightShift+C -> F20`
 - `sync_labwc_keybinds.py`: installs compositor-side keyboard shortcuts into `labwc`
 - `sync_keyd_default_conf.py`: installs the `keyd` include into `/etc/keyd/default.conf`
 - `uconsole-mapper.service`: `systemd --user` service file
@@ -39,6 +40,12 @@ cd ~/WorkSpace/uconsole-mapper
 `RightShift+C` now depends on `keyd`. If your distro packages it, install
 `keyd` before running `./install.sh`; the installer will then wire
 `/etc/keyd/default.conf` automatically.
+
+The generated desktop launcher config lives at:
+
+```bash
+~/.config/uconsole-mapper/desktop-keybinds.toml
+```
 
 ## Configuration
 
@@ -159,21 +166,44 @@ By default, keyboard shortcuts are no longer routed through `uconsole-mapper`.
 Normal typing stays on the physical keyboard path, while desktop shortcuts are
 split across `keyd` and `labwc`.
 
-Managed default keybinds:
+Default declaration:
 
-- `RightShift+C`: `keyd` emits `F20`, then `labwc` runs `~/.local/bin/run-or-raise-chromium`
+```toml
+[keyd]
+bridge_keysyms = ["F13", "F14", "...", "F35"]
+
+[[rightshift.bindings]]
+key = "c"
+command = "~/.local/bin/run-or-raise-chromium"
+
+[[labwc.bindings]]
+key = "S-Return"
+command = "~/.local/bin/shift-enter-newline"
+```
+
+Generated default behavior:
+
+- `RightShift+C`: generator assigns a bridge keysym such as `F13`, `keyd` emits it, then `labwc` runs `~/.local/bin/run-or-raise-chromium`
 - `Shift+Enter`: `labwc` runs `~/.local/bin/shift-enter-newline`
 
 `install.sh` installs these pieces:
 
-- `~/.config/labwc/rc.xml`: `sync_labwc_keybinds.py` manages `F20` and `Shift+Enter`
-- `/etc/keyd/uconsole-mapper`: modular `keyd` snippet containing the `RightShift+C -> F20` remap
+- `~/.config/uconsole-mapper/desktop-keybinds.toml`: the declaration you maintain
+- `~/.local/share/uconsole-mapper/keyd-uconsole-mapper`: generated `keyd` snippet
+- `~/.local/share/uconsole-mapper/labwc-keybinds.xml`: generated `labwc` block
+- `~/.config/labwc/rc.xml`: `sync_labwc_keybinds.py` inserts the generated block
+- `/etc/keyd/uconsole-mapper`: installed copy of the generated `keyd` snippet
 - `/etc/keyd/default.conf`: `sync_keyd_default_conf.py` inserts `include uconsole-mapper`
 
-This split is intentional. `labwc` keybinds can safely express `F20` and
-`Shift+Enter`, but they cannot safely express a right-only Shift modifier for
-`C`. `keyd` handles the side-specific remap first, so `labwc` only sees the
-rare function key.
+This split is intentional. `labwc` keybinds can safely express rare bridge
+keysyms such as `F13-F35` and `Shift+Enter`, but they cannot safely express a
+right-only Shift modifier for `C`. `keyd` handles the side-specific remap
+first, so `labwc` only sees the rare bridge key.
+
+The safe default bridge pool is `F13-F35`, so the generated setup supports 23
+`RightShift+...` launchers before you need to extend the pool. That covers many
+common launcher sets without you manually tracking which bridge key each app
+uses.
 
 If you do not want this on every keyboard, move `include uconsole-mapper` from
 `/etc/keyd/default.conf` into a device-specific `keyd` config instead.
