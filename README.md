@@ -185,6 +185,9 @@ Example:
 ```bash
 WHISPER_URL=http://127.0.0.1:3300/api/asr/transcriptions
 VOICE_OUTPUT_MODE=type
+VOICE_NOTIFY_USE_MARKUP=0
+VOICE_NOTIFY_FONT_SIZE=16
+VOICE_NOTIFY_PADDING_LINES=1
 ```
 
 Optional context-related variables:
@@ -218,4 +221,18 @@ Supported output modes:
 - `clipboard`: writes only to the clipboard
 - `paste`: writes to the clipboard first, then simulates `Ctrl+V`
 
+Notification behavior:
+
+- while recording / transcribing, the script updates a single persistent status notification
+- after successful transcription injection, the notification is closed instead of showing the recognized text
+- `VOICE_NOTIFY_USE_MARKUP` defaults to `0`; enable it only if the notification daemon correctly renders Pango markup
+- `VOICE_NOTIFY_FONT_SIZE` defaults to `16` and only applies when markup is enabled
+- `VOICE_NOTIFY_PADDING_LINES` defaults to `1` to make the notification taller
+
 If the `B` button on the device is not `BTN_THUMB2`, check the service logs or temporarily run `evtest` / `libinput debug-events` to confirm the actual key code before updating the configuration.
+
+## Failure Recovery
+
+- `uconsole-mapper.service` uses `Restart=always`, so systemd restarts the daemon if the main process exits
+- if a keyboard watcher task dies unexpectedly, the daemon now treats that as fatal and lets systemd restart the whole service immediately
+- if keyboard grab is enabled but the virtual keyboard write path breaks at runtime, the keyboard watcher drops out of grab mode and falls back to direct passthrough instead of keeping the physical keyboard locked

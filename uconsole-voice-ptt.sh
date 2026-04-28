@@ -38,6 +38,11 @@ Supported variables:
   VOICE_CHANNELS         default: 1
   VOICE_STATE_DIR        default: ${XDG_STATE_HOME:-~/.local/state}/uconsole-mapper
   VOICE_KEEP_AUDIO       1 keeps recorded audio after stop, default: 0
+  VOICE_NOTIFY_USE_MARKUP
+                         1 enables Pango markup for notifications, default: 0
+  VOICE_NOTIFY_FONT_SIZE notification font size when markup is enabled, default: 16
+  VOICE_NOTIFY_PADDING_LINES
+                        extra blank lines for a taller notification, default: 1
   VOICE_TMUX_CONTEXT     1 adds active tmux pane visible text as ASR context, default: 1
   VOICE_TMUX_CONTEXT_LINES
                         minimum lines sent from the active tmux pane, default: 30
@@ -57,7 +62,7 @@ show_status() {
     if [[ -n "${value}" ]]; then
       args+=(-h "int:value:${value}")
     fi
-    dunstify "${args[@]}" "${summary}" "${body}" >/dev/null 2>&1 || true
+    dunstify "${args[@]}" "$(format_status_text "${summary}")" "$(format_status_body "${body}")" >/dev/null 2>&1 || true
     return
   fi
 
@@ -66,13 +71,61 @@ show_status() {
   fi
 }
 
+close_status() {
+  if command -v dunstify >/dev/null 2>&1; then
+    dunstify -C "${VOICE_NOTIFY_ID}" >/dev/null 2>&1 || true
+  fi
+}
+
 show_recording_status() {
   if command -v dunstify >/dev/null 2>&1; then
-    dunstify -a "uconsole-voice" -r "${VOICE_NOTIFY_ID}" -u low -t 0 -h "int:value:20" "uconsole voice" "录音中..." >/dev/null 2>&1 || true
+    dunstify \
+      -a "uconsole-voice" \
+      -r "${VOICE_NOTIFY_ID}" \
+      -u low \
+      -t 0 \
+      -h "int:value:20" \
+      "$(format_status_text "uconsole voice")" \
+      "$(format_status_body "录音中...")" >/dev/null 2>&1 || true
     return
   fi
   if command -v notify-send >/dev/null 2>&1; then
     notify-send "uconsole voice" "录音中..." >/dev/null 2>&1 || true
+  fi
+}
+
+escape_markup() {
+  local text=${1:-}
+  text=${text//&/&amp;}
+  text=${text//</&lt;}
+  text=${text//>/&gt;}
+  printf '%s' "${text}"
+}
+
+format_status_text() {
+  local text=${1:-}
+  if [[ "${VOICE_NOTIFY_USE_MARKUP}" != "1" ]]; then
+    printf '%s' "${text}"
+    return
+  fi
+
+  text=$(escape_markup "${text}")
+  printf '<span size="%s">%s</span>' "${VOICE_NOTIFY_FONT_SIZE_PANGO}" "${text}"
+}
+
+format_status_body() {
+  local body=${1:-}
+  if [[ -z "${body}" ]]; then
+    printf '%s' ""
+    return
+  fi
+
+  local text
+  text=$(format_status_text "${body}")
+  if (( VOICE_NOTIFY_PADDING_LINES > 0 )); then
+    printf '\n%s' "${text}"
+  else
+    printf '%s' "${text}"
   fi
 }
 
@@ -515,7 +568,7 @@ stop_recording() {
     exit 1
   fi
 
-  show_status "uconsole voice" "已输入: ${text}" "90" "900"
+  close_status
   [[ "${VOICE_KEEP_AUDIO}" == "1" ]] || rm -f "${AUDIO_FILE}"
 }
 
@@ -541,6 +594,10 @@ VOICE_CHANNELS=${VOICE_CHANNELS:-1}
 VOICE_OUTPUT_MODE=${VOICE_OUTPUT_MODE:-type}
 VOICE_KEEP_AUDIO=${VOICE_KEEP_AUDIO:-0}
 VOICE_NOTIFY_ID=${VOICE_NOTIFY_ID:-991199}
+VOICE_NOTIFY_USE_MARKUP=${VOICE_NOTIFY_USE_MARKUP:-0}
+VOICE_NOTIFY_FONT_SIZE=${VOICE_NOTIFY_FONT_SIZE:-16}
+VOICE_NOTIFY_PADDING_LINES=${VOICE_NOTIFY_PADDING_LINES:-1}
+VOICE_NOTIFY_FONT_SIZE_PANGO=$((VOICE_NOTIFY_FONT_SIZE * 1000))
 VOICE_TMUX_CONTEXT=${VOICE_TMUX_CONTEXT:-1}
 VOICE_TMUX_CONTEXT_LINES=${VOICE_TMUX_CONTEXT_LINES:-30}
 VOICE_TMUX_CONTEXT_MAX_CHARS=${VOICE_TMUX_CONTEXT_MAX_CHARS:-1200}

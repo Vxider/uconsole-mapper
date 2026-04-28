@@ -92,6 +92,16 @@ class Config:
     mouse_remaps: list[MouseRemap]
 
 
+@dataclass(slots=True)
+class DeviceTask:
+    role: str
+    task: asyncio.Task[None]
+
+
+class DeviceWriteError(RuntimeError):
+    pass
+
+
 def load_config(path: Path) -> Config:
     raw = tomllib.loads(path.read_text(encoding="utf-8"))
 
@@ -396,17 +406,23 @@ class VirtualKeyboard:
         )
         # Keep repeat settings explicit so held keys repeat even when the
         # physical keyboard is grabbed and re-emitted through uinput.
-        try:
-            self.ui.device.repeat = (repeat_delay_ms, repeat_rate)
-        except (AttributeError, OSError) as exc:
-            LOGGER.warning("failed to configure keyboard repeat on virtual device: %s", exc)
+        if self.ui.device is None:
+            LOGGER.debug("virtual keyboard device handle is unavailable; skip repeat configuration")
+        else:
+            try:
+                self.ui.device.repeat = (repeat_delay_ms, repeat_rate)
+            except (AttributeError, OSError) as exc:
+                LOGGER.warning("failed to configure keyboard repeat on virtual device: %s", exc)
 
     def close(self) -> None:
         self.ui.close()
 
     def write_key(self, code: int, value: int) -> None:
-        self.ui.write(ecodes.EV_KEY, code, value)
-        self.ui.syn()
+        try:
+            self.ui.write(ecodes.EV_KEY, code, value)
+            self.ui.syn()
+        except OSError as exc:
+            raise DeviceWriteError(f"virtual keyboard write failed for key {code} value {value}: {exc}") from exc
 
 
 class KeyboardWatcher:
@@ -442,18 +458,25 @@ class KeyboardWatcher:
         self.active_bindings: set[int] = set()
         self.consumed_keys: set[int] = set()
         self.repeat_tasks: dict[int, asyncio.Task[None]] = {}
+        self.grab_active = self.virtual_keyboard is not None
+        self.grab_degraded = False
 
     async def run(self) -> None:
         grabbed = False
         LOGGER.info("watch keyboard: %s (%s)", self.device.name, self.device.path)
         try:
-            if self.config.keyboard_grab:
+            if self.grab_active:
                 self.device.grab()
                 grabbed = True
             async for event in self.device.async_read_loop():
                 if event.type != ecodes.EV_KEY:
                     continue
-                self._handle_key(event.code, event.value)
+                try:
+                    self._handle_key(event.code, event.value)
+                except DeviceWriteError as exc:
+                    if not self._degrade_to_passthrough(exc, grabbed):
+                        raise
+                    grabbed = False
         except OSError as exc:
             LOGGER.warning("keyboard watcher stopped for %s: %s", self.device.path, exc)
         finally:
@@ -467,6 +490,37 @@ class KeyboardWatcher:
             for task in self.repeat_tasks.values():
                 task.cancel()
             self.device.close()
+
+    def _degrade_to_passthrough(self, exc: DeviceWriteError, grabbed: bool) -> bool:
+        if not self.grab_active or self.grab_degraded:
+            return False
+
+        LOGGER.error(
+            "keyboard watchdog: virtual keyboard path failed for %s; disabling grab and falling back to passthrough: %s",
+            self.device.path,
+            exc,
+        )
+        self.grab_degraded = True
+        self.grab_active = False
+        self.pending_order.clear()
+        self.pending_set.clear()
+        self.active_bindings.clear()
+        self.consumed_keys.clear()
+        for task in self.repeat_tasks.values():
+            task.cancel()
+        self.repeat_tasks.clear()
+        if grabbed:
+            try:
+                self.device.ungrab()
+            except OSError:
+                pass
+        if self.virtual_keyboard is not None:
+            try:
+                self.virtual_keyboard.close()
+            except OSError:
+                pass
+            self.virtual_keyboard = None
+        return True
 
     def _binding_codes(self) -> set[int]:
         codes: set[int] = set()
@@ -551,7 +605,7 @@ class KeyboardWatcher:
             return
 
     def _handle_key(self, code: int, value: int) -> None:
-        if not self.config.keyboard_grab:
+        if not self.grab_active:
             self._handle_key_passthrough(code, value)
             return
 
@@ -740,13 +794,13 @@ class MapperDaemon:
         self.config = config
         self.runner = ActionRunner()
         self.virtual_mouse = VirtualMouse() if config.mouse_enabled else None
-        self.tasks: dict[str, asyncio.Task[None]] = {}
+        self.tasks: dict[str, DeviceTask] = {}
 
     async def shutdown(self) -> None:
-        for task in list(self.tasks.values()):
-            task.cancel()
+        for entry in list(self.tasks.values()):
+            entry.task.cancel()
         if self.tasks:
-            await asyncio.gather(*self.tasks.values(), return_exceptions=True)
+            await asyncio.gather(*(entry.task for entry in self.tasks.values()), return_exceptions=True)
             self.tasks.clear()
         if self.virtual_mouse is not None:
             self.virtual_mouse.close()
@@ -758,15 +812,20 @@ class MapperDaemon:
             await asyncio.sleep(self.config.rescan_seconds)
 
     def _prune_tasks(self) -> None:
-        finished = [path for path, task in self.tasks.items() if task.done()]
+        finished = [path for path, entry in self.tasks.items() if entry.task.done()]
         for path in finished:
-            task = self.tasks.pop(path)
+            entry = self.tasks.pop(path)
             try:
-                task.result()
+                entry.task.result()
             except asyncio.CancelledError:
                 pass
             except Exception as exc:
                 LOGGER.exception("device task failed for %s: %s", path, exc)
+                if entry.role == "keyboard":
+                    raise RuntimeError(f"keyboard watcher crashed for {path}") from exc
+            else:
+                if entry.role == "keyboard":
+                    raise RuntimeError(f"keyboard watcher exited unexpectedly for {path}")
 
     def _scan_devices(self) -> None:
         active_paths = set(self.tasks)
@@ -781,18 +840,18 @@ class MapperDaemon:
             role = self._detect_role(device)
             if role == "gamepad":
                 task = asyncio.create_task(GamepadWatcher(device, self.config, self.runner).run())
-                self.tasks[path] = task
+                self.tasks[path] = DeviceTask(role=role, task=task)
             elif role == "keyboard":
                 task = asyncio.create_task(
                     KeyboardWatcher(device, self.config, self.runner, self.virtual_mouse).run()
                 )
-                self.tasks[path] = task
+                self.tasks[path] = DeviceTask(role=role, task=task)
             elif role == "mouse":
                 if self.virtual_mouse is None:
                     device.close()
                     continue
                 task = asyncio.create_task(MouseWatcher(device, self.config, self.virtual_mouse).run())
-                self.tasks[path] = task
+                self.tasks[path] = DeviceTask(role=role, task=task)
             else:
                 device.close()
 

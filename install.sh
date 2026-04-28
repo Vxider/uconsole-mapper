@@ -6,10 +6,16 @@ APP_DIR="${HOME}/.local/share/uconsole-mapper"
 BIN_DIR="${HOME}/.local/bin"
 CONFIG_DIR="${HOME}/.config/uconsole-mapper"
 SYSTEMD_DIR="${HOME}/.config/systemd/user"
+PYTHON_BIN=${PYTHON_BIN:-/usr/bin/python3}
 
 mkdir -p "${APP_DIR}" "${BIN_DIR}" "${CONFIG_DIR}" "${SYSTEMD_DIR}"
 
-if ! python3 -c 'import evdev' >/dev/null 2>&1; then
+if [[ ! -x "${PYTHON_BIN}" ]]; then
+  echo "Python interpreter not found: ${PYTHON_BIN}"
+  exit 1
+fi
+
+if ! "${PYTHON_BIN}" -c 'import evdev' >/dev/null 2>&1; then
   echo "Missing python3-evdev. Install it first:"
   echo "  sudo apt update && sudo apt install -y python3-evdev"
   exit 1
@@ -25,8 +31,19 @@ if [[ ! -w /dev/uinput ]]; then
   echo "Configuring /dev/uinput permissions for group input..."
   sudo install -m 0644 "${SCRIPT_DIR}/99-uinput.rules" /etc/udev/rules.d/99-uinput.rules
   sudo udevadm control --reload-rules
+  sudo udevadm trigger --name-match=uinput >/dev/null 2>&1 || true
   sudo chgrp input /dev/uinput
   sudo chmod 0660 /dev/uinput
+  if command -v setfacl >/dev/null 2>&1; then
+    sudo setfacl -m "u:${USER}:rw" /dev/uinput
+  fi
+fi
+
+if [[ ! -w /dev/uinput ]]; then
+  echo "Unable to get write access to /dev/uinput for ${USER}."
+  echo "Add the user to the input group or grant a persistent ACL, then rerun install."
+  echo "  sudo usermod -aG input ${USER}"
+  exit 1
 fi
 
 install -m 0755 "${SCRIPT_DIR}/uconsole_mapper.py" "${APP_DIR}/uconsole_mapper.py"
