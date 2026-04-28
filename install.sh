@@ -63,6 +63,9 @@ fi
 if [[ ! -f "${CONFIG_DIR}/voice.env" ]]; then
   install -m 0644 "${SCRIPT_DIR}/voice.env.example" "${CONFIG_DIR}/voice.env"
 fi
+if [[ ! -f "${CONFIG_DIR}/voice-glossary.txt" ]]; then
+  install -m 0644 "${SCRIPT_DIR}/voice-glossary.txt.example" "${CONFIG_DIR}/voice-glossary.txt"
+fi
 if [[ ! -f "${CONFIG_DIR}/desktop-keybinds.toml" ]]; then
   install -m 0644 "${SCRIPT_DIR}/desktop-keybinds.toml.example" "${CONFIG_DIR}/desktop-keybinds.toml"
 fi
@@ -89,9 +92,11 @@ systemctl --user restart uconsole-mapper.service
 echo
 echo "Installed uconsole-mapper."
 echo "Config:   ${CONFIG_DIR}/config.toml"
+echo "Voice:    ${CONFIG_DIR}/voice.env"
+echo "Glossary: ${CONFIG_DIR}/voice-glossary.txt"
 echo "Hotkeys:  ${CONFIG_DIR}/desktop-keybinds.toml"
 echo "Labwc:    ~/.config/labwc/rc.xml"
-echo "Keyd:     /etc/keyd/default.conf -> include uconsole-mapper"
+echo "Keyd:     /etc/keyd/default.conf -> explicit uConsole keyboard ids"
 echo "Service:  systemctl --user status uconsole-mapper.service"
 echo "Logs:     journalctl --user -u uconsole-mapper.service -f"
 echo

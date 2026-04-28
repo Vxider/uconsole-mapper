@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from datetime import datetime
 from pathlib import Path
+import os
 import re
 import sys
 
@@ -15,14 +16,15 @@ DEFAULT_BLOCK_FILE = Path(__file__).resolve().with_name("labwc-keybinds.xml")
 
 
 def default_block() -> str:
+    home_bin = os.path.expanduser("~/.local/bin")
     return "\n".join(
         [
             BEGIN_MARKER,
             '<keybind key="F20">',
-            '  <action name="Execute" command="~/.local/bin/run-or-raise-chromium" />',
+            f'  <action name="Execute" command="{home_bin}/run-or-raise-chromium" />',
             "</keybind>",
             '<keybind key="S-Return">',
-            '  <action name="Execute" command="~/.local/bin/shift-enter-newline" />',
+            f'  <action name="Execute" command="{home_bin}/shift-enter-newline" />',
             "</keybind>",
             END_MARKER,
             "",

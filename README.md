@@ -20,7 +20,7 @@ The project uses a "daemon + configuration" design, which makes it easier to add
 - `generate_desktop_keybinds.py`: generates `keyd` and `labwc` snippets from the desktop shortcut config
 - `run-or-raise-chromium.sh`: raises an existing Chromium window or starts a new one
 - `sync_labwc_keybinds.py`: installs compositor-side keyboard shortcuts into `labwc`
-- `sync_keyd_default_conf.py`: installs the `keyd` include into `/etc/keyd/default.conf`
+- `sync_keyd_default_conf.py`: detects the uConsole keyboard id and writes a device-specific `/etc/keyd/default.conf`
 - `uconsole-mapper.service`: `systemd --user` service file
 - `99-uinput.rules`: grants `/dev/uinput` access to the `input` group
 - `install.sh`: installation script
@@ -38,8 +38,8 @@ cd ~/WorkSpace/uconsole-mapper
 ```
 
 `RightShift+C` now depends on `keyd`. If your distro packages it, install
-`keyd` before running `./install.sh`; the installer will then wire
-`/etc/keyd/default.conf` automatically.
+`keyd` before running `./install.sh`; the installer will detect the current
+uConsole keyboard id and wire `/etc/keyd/default.conf` automatically.
 
 The generated desktop launcher config lives at:
 
@@ -193,20 +193,21 @@ Generated default behavior:
 - `~/.local/share/uconsole-mapper/labwc-keybinds.xml`: generated `labwc` block
 - `~/.config/labwc/rc.xml`: `sync_labwc_keybinds.py` inserts the generated block
 - `/etc/keyd/uconsole-mapper`: installed copy of the generated `keyd` snippet
-- `/etc/keyd/default.conf`: `sync_keyd_default_conf.py` inserts `include uconsole-mapper`
+- `/etc/keyd/default.conf`: `sync_keyd_default_conf.py` writes explicit uConsole keyboard ids plus `include uconsole-mapper`
 
 This split is intentional. `labwc` keybinds can safely express rare bridge
 keysyms such as `F13-F35` and `Shift+Enter`, but they cannot safely express a
 right-only Shift modifier for `C`. `keyd` handles the side-specific remap
 first, so `labwc` only sees the rare bridge key.
 
+The installer now writes explicit device ids into `/etc/keyd/default.conf`
+instead of relying on the `*` wildcard. This is important on uConsole because
+`keyd` may otherwise ignore the built-in keyboard entirely.
+
 The safe default bridge pool is `F13-F35`, so the generated setup supports 23
 `RightShift+...` launchers before you need to extend the pool. That covers many
 common launcher sets without you manually tracking which bridge key each app
 uses.
-
-If you do not want this on every keyboard, move `include uconsole-mapper` from
-`/etc/keyd/default.conf` into a device-specific `keyd` config instead.
 
 Legacy `[keyboard]` interception mode still exists for compatibility, but it is
 disabled in the example config because it puts normal typing on top of the
@@ -229,13 +230,16 @@ press_command = "~/.local/bin/uconsole-voice-ptt start"
 release_command = "~/.local/bin/uconsole-voice-ptt stop"
 ```
 
-Default configuration file path:
+Default configuration files:
 
 ```bash
 ~/.config/uconsole-mapper/voice.env
+~/.config/uconsole-mapper/voice-glossary.txt
 ```
 
-Example:
+`voice-glossary.txt` accepts one term per line. Blank lines and lines starting with `#` are ignored. The default example includes `git`.
+
+Example `voice.env`:
 
 ```bash
 WHISPER_URL=http://127.0.0.1:3300/api/asr/transcriptions
@@ -245,13 +249,17 @@ VOICE_NOTIFY_FONT_SIZE=16
 VOICE_NOTIFY_PADDING_LINES=1
 ```
 
-Optional context-related variables:
+Optional ASR request variables:
 
 ```bash
 # Optional short ASR hint sent to the upstream transcription model.
 # WHISPER_PROMPT=
 # Multipart field name for the ASR prompt. Defaults to prompt.
 # WHISPER_PROMPT_FIELD=prompt
+# Multipart field name for request-level glossary JSON. Defaults to promptGlossary.
+# WHISPER_PROMPT_GLOSSARY_FIELD=promptGlossary
+# User glossary file, one term per line.
+# VOICE_GLOSSARY_FILE=~/.config/uconsole-mapper/voice-glossary.txt
 # Multipart field name for tmux context sent to correction. Defaults to contextText.
 # WHISPER_CONTEXT_FIELD=contextText
 # Ask the ASR service to run correction. Defaults to 1.

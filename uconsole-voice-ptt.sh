@@ -25,6 +25,10 @@ Supported variables:
   WHISPER_AUTH_TOKEN     optional bearer token
   WHISPER_PROMPT         optional short ASR prompt hint
   WHISPER_PROMPT_FIELD   multipart field for ASR prompt, default: prompt
+  WHISPER_PROMPT_GLOSSARY_FIELD
+                         multipart field for prompt glossary JSON, default: promptGlossary
+  VOICE_GLOSSARY_FILE    glossary file path, one term per line; default:
+                         ~/.config/uconsole-mapper/voice-glossary.txt
   WHISPER_CONTEXT_FIELD  multipart field for tmux context, default: contextText
   WHISPER_ENABLE_CORRECTION
                          1 sends enableCorrection=true, default: 1
@@ -352,6 +356,29 @@ build_whisper_prompt() {
   printf '%s\n' "${WHISPER_PROMPT}"
 }
 
+build_prompt_glossary_json() {
+  local glossary_file=${VOICE_GLOSSARY_FILE:-}
+  [[ -n "${glossary_file}" ]] || return 1
+  [[ -f "${glossary_file}" ]] || return 1
+
+  local -a terms=()
+  local term
+  local -A seen=()
+
+  while IFS= read -r term || [[ -n "${term}" ]]; do
+    term=$(printf '%s' "${term}" | trim)
+    [[ -n "${term}" ]] || continue
+    [[ "${term:0:1}" != "#" ]] || continue
+    [[ -z "${seen[$term]+x}" ]] || continue
+    seen[$term]=1
+    terms+=("${term}")
+  done <"${glossary_file}"
+
+  (( ${#terms[@]} > 0 )) || return 1
+
+  printf '%s\n' "${terms[@]}" | jq -Rn '{terms: [inputs | select(length > 0)]}'
+}
+
 build_whisper_context() {
   local tmux_context=
   tmux_context=$(capture_tmux_window_context || true)
@@ -516,6 +543,7 @@ stop_recording() {
   response_file=$(mktemp "${VOICE_STATE_DIR}/whisper-XXXXXX.json")
 
   local prompt_text=
+  local prompt_glossary_json=
   local context_text=
   local -a curl_args=(
     -fsS
@@ -538,6 +566,10 @@ stop_recording() {
   prompt_text=$(build_whisper_prompt || true)
   if [[ -n "${prompt_text}" ]]; then
     curl_args+=(--form-string "${WHISPER_PROMPT_FIELD}=${prompt_text}")
+  fi
+  prompt_glossary_json=$(build_prompt_glossary_json || true)
+  if [[ -n "${prompt_glossary_json}" ]]; then
+    curl_args+=(--form-string "${WHISPER_PROMPT_GLOSSARY_FIELD}=${prompt_glossary_json}")
   fi
   context_text=$(build_whisper_context || true)
   if [[ -n "${context_text}" ]]; then
@@ -584,6 +616,7 @@ if [[ -f "${CONFIG_FILE}" ]]; then
   source "${CONFIG_FILE}"
 fi
 
+VOICE_GLOSSARY_FILE=${VOICE_GLOSSARY_FILE:-"${HOME}/.config/uconsole-mapper/voice-glossary.txt"}
 VOICE_STATE_DIR=${VOICE_STATE_DIR:-"${XDG_STATE_HOME:-${HOME}/.local/state}/uconsole-mapper"}
 STATE_FILE="${VOICE_STATE_DIR}/voice-ptt.state"
 VOICE_RECORDER=${VOICE_RECORDER:-auto}
@@ -608,6 +641,7 @@ WHISPER_LANGUAGE=${WHISPER_LANGUAGE:-}
 WHISPER_AUTH_TOKEN=${WHISPER_AUTH_TOKEN:-}
 WHISPER_PROMPT=${WHISPER_PROMPT:-}
 WHISPER_PROMPT_FIELD=${WHISPER_PROMPT_FIELD:-prompt}
+WHISPER_PROMPT_GLOSSARY_FIELD=${WHISPER_PROMPT_GLOSSARY_FIELD:-promptGlossary}
 WHISPER_CONTEXT_FIELD=${WHISPER_CONTEXT_FIELD:-contextText}
 WHISPER_ENABLE_CORRECTION=${WHISPER_ENABLE_CORRECTION:-1}
 WHISPER_TEXT_JQ=${WHISPER_TEXT_JQ:-'.text // .result.text // .data.text // empty'}
