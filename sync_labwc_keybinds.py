@@ -20,9 +20,6 @@ def default_block() -> str:
     return "\n".join(
         [
             BEGIN_MARKER,
-            '<keybind key="F20">',
-            f'  <action name="Execute" command="{home_bin}/run-or-raise-chromium" />',
-            "</keybind>",
             '<keybind key="S-Return">',
             f'  <action name="Execute" command="{home_bin}/shift-enter-newline" />',
             "</keybind>",
@@ -92,7 +89,7 @@ def replace_managed_block(text: str, block: str) -> tuple[str, str]:
         )
         return pattern.sub(indent_block(block, item_indent), text, count=1), "updated"
 
-    if "run-or-raise-chromium" in text or "shift-enter-newline" in text:
+    if "shift-enter-newline" in text:
         return text, "skipped-existing"
 
     keyboard_close = re.search(r"(?m)^([ \t]*)</keyboard>\s*$", text)
@@ -128,7 +125,7 @@ def main() -> int:
     updated, status = replace_managed_block(original, block)
 
     if status == "skipped-existing":
-        print(f"skipped {config_path}: existing Chromium or Shift+Enter keybinds detected")
+        print(f"skipped {config_path}: existing Shift+Enter keybind detected")
         return 0
 
     if updated == original:

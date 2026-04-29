@@ -50,12 +50,16 @@ install -m 0755 "${SCRIPT_DIR}/uconsole_mapper.py" "${APP_DIR}/uconsole_mapper.p
 install -m 0755 "${SCRIPT_DIR}/toggle-codex-buddy.sh" "${BIN_DIR}/toggle-codex-buddy"
 install -m 0755 "${SCRIPT_DIR}/toggle-lxterminal.sh" "${BIN_DIR}/toggle-lxterminal"
 install -m 0755 "${SCRIPT_DIR}/run-or-raise-chromium.sh" "${BIN_DIR}/run-or-raise-chromium"
+install -m 0755 "${SCRIPT_DIR}/run-or-raise-filemanager.sh" "${BIN_DIR}/run-or-raise-filemanager"
+install -m 0755 "${SCRIPT_DIR}/run-or-raise-vscode.sh" "${BIN_DIR}/run-or-raise-vscode"
+install -m 0755 "${SCRIPT_DIR}/run-or-raise-zdesktop.sh" "${BIN_DIR}/run-or-raise-zdesktop"
 install -m 0755 "${SCRIPT_DIR}/shift-enter-newline.sh" "${BIN_DIR}/shift-enter-newline"
 install -m 0755 "${SCRIPT_DIR}/uconsole-voice-ptt.sh" "${BIN_DIR}/uconsole-voice-ptt"
 install -m 0755 "${SCRIPT_DIR}/generate_desktop_keybinds.py" "${APP_DIR}/generate_desktop_keybinds.py"
 install -m 0755 "${SCRIPT_DIR}/sync_labwc_keybinds.py" "${APP_DIR}/sync_labwc_keybinds.py"
 install -m 0755 "${SCRIPT_DIR}/sync_keyd_default_conf.py" "${APP_DIR}/sync_keyd_default_conf.py"
 install -m 0644 "${SCRIPT_DIR}/uconsole-mapper.service" "${SYSTEMD_DIR}/uconsole-mapper.service"
+sudo install -m 0755 "${SCRIPT_DIR}/uconsole-launch-in-session.sh" /usr/local/bin/uconsole-launch-in-session
 
 if [[ ! -f "${CONFIG_DIR}/config.toml" ]]; then
   install -m 0644 "${SCRIPT_DIR}/config.toml.example" "${CONFIG_DIR}/config.toml"
@@ -68,6 +72,16 @@ if [[ ! -f "${CONFIG_DIR}/voice-glossary.txt" ]]; then
 fi
 if [[ ! -f "${CONFIG_DIR}/desktop-keybinds.toml" ]]; then
   install -m 0644 "${SCRIPT_DIR}/desktop-keybinds.toml.example" "${CONFIG_DIR}/desktop-keybinds.toml"
+fi
+
+FCITX_CONFIG="${HOME}/.config/fcitx5/config"
+if [[ -f "${FCITX_CONFIG}" ]] && grep -q '^0=Shift_L$' "${FCITX_CONFIG}"; then
+  cp "${FCITX_CONFIG}" "${FCITX_CONFIG}.bak.$(date +%Y%m%d-%H%M%S)"
+  perl -0pi -e 's/\[Hotkey\/AltTriggerKeys\]\n0=Shift_L\n/[Hotkey\/AltTriggerKeys]\n/s' "${FCITX_CONFIG}"
+  if command -v fcitx5-remote >/dev/null 2>&1; then
+    fcitx5-remote -r >/dev/null 2>&1 || true
+  fi
+  echo "Updated fcitx5: removed single Shift_L input-method toggle to avoid RightShift desktop shortcut conflicts."
 fi
 
 "${PYTHON_BIN}" "${APP_DIR}/generate_desktop_keybinds.py" --config "${CONFIG_DIR}/desktop-keybinds.toml"
@@ -97,11 +111,12 @@ echo "Glossary: ${CONFIG_DIR}/voice-glossary.txt"
 echo "Hotkeys:  ${CONFIG_DIR}/desktop-keybinds.toml"
 echo "Labwc:    ~/.config/labwc/rc.xml"
 echo "Keyd:     /etc/keyd/default.conf -> explicit uConsole keyboard ids"
+echo "Launcher: /usr/local/bin/uconsole-launch-in-session"
 echo "Service:  systemctl --user status uconsole-mapper.service"
 echo "Logs:     journalctl --user -u uconsole-mapper.service -f"
 echo
 if ! command -v keyd >/dev/null 2>&1 && [[ ! -d /etc/keyd ]]; then
   echo "RightShift+C requires keyd. Install keyd, then rerun ./install.sh to wire /etc/keyd/default.conf."
 fi
-echo "Keyboard shortcuts now prefer keyd + labwc."
+echo "RightShift shortcuts now prefer keyd direct commands; labwc keeps compositor-style binds like Shift+Enter."
 echo "If ${CONFIG_DIR}/config.toml still has [keyboard] enabled, disable that legacy mode to avoid keyboard grab failures."

@@ -7,7 +7,7 @@
 - `BTN_TRIGGER` (right-side `X`) manages `codex-buddy` and makes new windows fullscreen
 - `BTN_TOP` (right-side `Y`) manages `QuickTerm`
 - `BTN_THUMB` (right-side `A`) types `继续` and presses Enter after a `700ms` hold
-- Desktop keybind integration keeps `RightShift+C` for Chromium through generated `keyd -> bridge keysym -> labwc` bindings, and installs `Shift+Enter` for terminal-style multiline input
+- Desktop keybind integration keeps `RightShift+C` for Chromium, `RightShift+D` for `~/zDesktop`, `RightShift+F` for the file manager, and `RightShift+V` for VS Code through generated `keyd -> session launcher` bindings, and installs `Shift+Enter` for terminal-style multiline input
 - Mouse `BTN_MIDDLE` is remapped to `BTN_LEFT`
 
 The project uses a "daemon + configuration" design, which makes it easier to add combo bindings or custom actions than continuing to stack more `input-remapper` rules.
@@ -17,8 +17,12 @@ The project uses a "daemon + configuration" design, which makes it easier to add
 - `uconsole_mapper.py`: main program
 - `config.toml.example`: example configuration
 - `desktop-keybinds.toml.example`: declarative desktop shortcut config
-- `generate_desktop_keybinds.py`: generates `keyd` and `labwc` snippets from the desktop shortcut config
+- `generate_desktop_keybinds.py`: generates direct `keyd` launch bindings plus `labwc` snippets from the desktop shortcut config
 - `run-or-raise-chromium.sh`: raises an existing Chromium window or starts a new one
+- `run-or-raise-filemanager.sh`: raises an existing file manager window or starts a new one
+- `run-or-raise-vscode.sh`: raises an existing VS Code window or starts a new one
+- `run-or-raise-zdesktop.sh`: opens `~/zDesktop` in the file manager or focuses that window if it already exists
+- `uconsole-launch-in-session.sh`: runs GUI commands from `keyd` inside the active desktop user session
 - `sync_labwc_keybinds.py`: installs compositor-side keyboard shortcuts into `labwc`
 - `sync_keyd_default_conf.py`: detects the uConsole keyboard id and writes a device-specific `/etc/keyd/default.conf`
 - `uconsole-mapper.service`: `systemd --user` service file
@@ -39,7 +43,9 @@ cd ~/WorkSpace/uconsole-mapper
 
 `RightShift+C` now depends on `keyd`. If your distro packages it, install
 `keyd` before running `./install.sh`; the installer will detect the current
-uConsole keyboard id and wire `/etc/keyd/default.conf` automatically.
+uConsole keyboard id and wire `/etc/keyd/default.conf` automatically. The
+installer also removes `fcitx5`'s single-Shift toggle when it finds
+`Shift_L`, because that hotkey conflicts with `RightShift+...` desktop binds.
 
 The generated desktop launcher config lives at:
 
@@ -163,18 +169,28 @@ terminal UIs, where plain `Shift+Enter` is often not exposed as a distinct key.
 ## Desktop Keybinds
 
 By default, keyboard shortcuts are no longer routed through `uconsole-mapper`.
-Normal typing stays on the physical keyboard path, while desktop shortcuts are
-split across `keyd` and `labwc`.
+Normal typing stays on the physical keyboard path. `RightShift+...` launchers
+are handled directly by `keyd`, while compositor-specific binds stay in
+`labwc`.
 
 Default declaration:
 
 ```toml
-[keyd]
-bridge_keysyms = ["F13", "F14", "...", "F35"]
-
 [[rightshift.bindings]]
 key = "c"
 command = "~/.local/bin/run-or-raise-chromium"
+
+[[rightshift.bindings]]
+key = "f"
+command = "~/.local/bin/run-or-raise-filemanager"
+
+[[rightshift.bindings]]
+key = "d"
+command = "~/.local/bin/run-or-raise-zdesktop"
+
+[[rightshift.bindings]]
+key = "v"
+command = "~/.local/bin/run-or-raise-vscode"
 
 [[labwc.bindings]]
 key = "S-Return"
@@ -183,7 +199,10 @@ command = "~/.local/bin/shift-enter-newline"
 
 Generated default behavior:
 
-- `RightShift+C`: generator assigns a bridge keysym such as `F13`, `keyd` emits it, then `labwc` runs `~/.local/bin/run-or-raise-chromium`
+- `RightShift+C`: `keyd` runs `/usr/local/bin/uconsole-launch-in-session ~/.local/bin/run-or-raise-chromium`
+- `RightShift+D`: `keyd` runs `/usr/local/bin/uconsole-launch-in-session ~/.local/bin/run-or-raise-zdesktop`
+- `RightShift+F`: `keyd` runs `/usr/local/bin/uconsole-launch-in-session ~/.local/bin/run-or-raise-filemanager`
+- `RightShift+V`: `keyd` runs `/usr/local/bin/uconsole-launch-in-session ~/.local/bin/run-or-raise-vscode`
 - `Shift+Enter`: `labwc` runs `~/.local/bin/shift-enter-newline`
 
 `install.sh` installs these pieces:
@@ -191,23 +210,23 @@ Generated default behavior:
 - `~/.config/uconsole-mapper/desktop-keybinds.toml`: the declaration you maintain
 - `~/.local/share/uconsole-mapper/keyd-uconsole-mapper`: generated `keyd` snippet
 - `~/.local/share/uconsole-mapper/labwc-keybinds.xml`: generated `labwc` block
+- `/usr/local/bin/uconsole-launch-in-session`: helper that re-enters the active user session from `keyd`
 - `~/.config/labwc/rc.xml`: `sync_labwc_keybinds.py` inserts the generated block
 - `/etc/keyd/uconsole-mapper`: installed copy of the generated `keyd` snippet
 - `/etc/keyd/default.conf`: `sync_keyd_default_conf.py` writes explicit uConsole keyboard ids plus `include uconsole-mapper`
 
-This split is intentional. `labwc` keybinds can safely express rare bridge
-keysyms such as `F13-F35` and `Shift+Enter`, but they cannot safely express a
-right-only Shift modifier for `C`. `keyd` handles the side-specific remap
-first, so `labwc` only sees the rare bridge key.
+This split is intentional. `keyd` can reliably match a right-only Shift combo,
+while `labwc` remains the right place for compositor-facing binds such as
+`Shift+Enter`. Launching Chromium directly from `keyd` avoids the previous
+bridge-key path, which interacted badly with `fcitx5` single-Shift toggles.
 
 The installer now writes explicit device ids into `/etc/keyd/default.conf`
 instead of relying on the `*` wildcard. This is important on uConsole because
 `keyd` may otherwise ignore the built-in keyboard entirely.
 
-The safe default bridge pool is `F13-F35`, so the generated setup supports 23
-`RightShift+...` launchers before you need to extend the pool. That covers many
-common launcher sets without you manually tracking which bridge key each app
-uses.
+If you use `fcitx5`, avoid binding plain `Shift_L` as an input-method toggle.
+That hotkey can steal or distort `RightShift+...` launchers because `keyd`
+needs Shift-layer semantics to distinguish side-specific combos.
 
 Legacy `[keyboard]` interception mode still exists for compatibility, but it is
 disabled in the example config because it puts normal typing on top of the
