@@ -1,6 +1,7 @@
 # Declarative desktop shortcut config.
-# RightShift bindings are handled directly by keyd through
-# /usr/local/bin/uconsole-launch-in-session.
+# RightShift launchers are handled directly by keyd through
+# /usr/local/bin/uconsole-launch-in-session, while compositor-native
+# shortcuts such as Shift+Enter stay in the labwc section.
 
 [[rightshift.bindings]]
 key = "c"
