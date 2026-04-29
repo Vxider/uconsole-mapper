@@ -17,11 +17,7 @@ WINDOW_SPECS=(
   "title:codex-buddy"
 )
 COMMAND=(
-  "${HOME}/.local/bin/codex-buddy"
-  "uconsole"
-  "--server-url"
-  "http://dgx-spark.tail97583.ts.net:8787"
-  "--no-led"
+  "${HOME}/.local/bin/codex-buddy-uconsole"
 )
 
 find_window_spec() {
