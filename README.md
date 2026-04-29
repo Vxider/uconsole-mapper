@@ -41,6 +41,9 @@ cd ~/WorkSpace/uconsole-mapper
 ./install.sh
 ```
 
+`./install.sh` marks `python3-evdev` as a manual package so a later
+`apt autoremove` does not remove the mapper's core runtime dependency.
+
 `RightShift+C` now depends on `keyd`. If your distro packages it, install
 `keyd` before running `./install.sh`; the installer will detect the current
 uConsole keyboard id and wire `/etc/keyd/default.conf` automatically. The
@@ -134,6 +137,7 @@ Current `toggle-lxterminal` behavior:
 If the service does not start, check these first:
 
 - Whether `python3-evdev` is installed
+- Whether `python3-evdev` was removed by `apt autoremove`
 - Whether `wtype` is installed when text-input bindings are used
 - Whether `/dev/uinput` exists
 - Whether the current user has read access to `/dev/input/event*`

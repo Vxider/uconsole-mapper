@@ -21,6 +21,10 @@ if ! "${PYTHON_BIN}" -c 'import evdev' >/dev/null 2>&1; then
   exit 1
 fi
 
+if command -v apt-mark >/dev/null 2>&1; then
+  sudo apt-mark manual python3-evdev >/dev/null 2>&1 || true
+fi
+
 if [[ ! -e /dev/uinput ]]; then
   echo "Missing /dev/uinput. Enable it first:"
   echo "  sudo modprobe uinput"
