@@ -6,6 +6,29 @@ if [[ $# -eq 0 ]]; then
   exit 1
 fi
 
+read_systemd_user_env() {
+  local show_env_cmd=("$@")
+  local line
+
+  WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-}
+  DISPLAY=${DISPLAY:-}
+  DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-}
+
+  while IFS= read -r line; do
+    case "${line}" in
+      WAYLAND_DISPLAY=*)
+        WAYLAND_DISPLAY=${line#WAYLAND_DISPLAY=}
+        ;;
+      DISPLAY=*)
+        DISPLAY=${line#DISPLAY=}
+        ;;
+      DBUS_SESSION_BUS_ADDRESS=*)
+        DBUS_SESSION_BUS_ADDRESS=${line#DBUS_SESSION_BUS_ADDRESS=}
+        ;;
+    esac
+  done < <("${show_env_cmd[@]}" 2>/dev/null || true)
+}
+
 detect_user() {
   if [[ -n "${UCONSOLE_SESSION_USER:-}" ]]; then
     printf '%s\n' "${UCONSOLE_SESSION_USER}"
@@ -31,32 +54,25 @@ detect_user() {
 read_user_env() {
   local user=$1
   local uid=$2
-  local line
-
-  WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-}
-  DISPLAY=${DISPLAY:-}
-  DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-}
 
   if command -v runuser >/dev/null 2>&1; then
-    while IFS= read -r line; do
-      case "${line}" in
-        WAYLAND_DISPLAY=*)
-          WAYLAND_DISPLAY=${line#WAYLAND_DISPLAY=}
-          ;;
-        DISPLAY=*)
-          DISPLAY=${line#DISPLAY=}
-          ;;
-        DBUS_SESSION_BUS_ADDRESS=*)
-          DBUS_SESSION_BUS_ADDRESS=${line#DBUS_SESSION_BUS_ADDRESS=}
-          ;;
-      esac
-    done < <(runuser -u "${user}" -- systemctl --user show-environment 2>/dev/null || true)
+    read_systemd_user_env runuser -u "${user}" -- systemctl --user show-environment
   fi
 
   WAYLAND_DISPLAY=${WAYLAND_DISPLAY:-wayland-0}
   DISPLAY=${DISPLAY:-:0}
   DBUS_SESSION_BUS_ADDRESS=${DBUS_SESSION_BUS_ADDRESS:-unix:path=/run/user/${uid}/bus}
 }
+
+if [[ ${EUID} -ne 0 ]]; then
+  CURRENT_UID=$(id -u)
+  export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/${CURRENT_UID}}"
+  read_systemd_user_env systemctl --user show-environment
+  export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
+  export DISPLAY="${DISPLAY:-:0}"
+  export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=${XDG_RUNTIME_DIR}/bus}"
+  exec "$@"
+fi
 
 TARGET_USER=$(detect_user)
 TARGET_UID=$(id -u "${TARGET_USER}")
