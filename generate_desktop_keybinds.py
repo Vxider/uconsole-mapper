@@ -7,7 +7,7 @@ import html
 import os
 import shlex
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 try:
@@ -30,7 +30,9 @@ class RightShiftBinding:
 @dataclass(slots=True)
 class LabwcBinding:
     key: str
-    command: str
+    command: str | None = None
+    action: str | None = None
+    attributes: dict[str, str] = field(default_factory=dict)
     comment: str | None = None
 
 
@@ -83,13 +85,35 @@ def load_config(path: Path) -> tuple[list[RightShiftBinding], list[LabwcBinding]
         if not isinstance(item, dict):
             raise ValueError(f"labwc.bindings[{index}] must be a table")
         key = str(item.get("key", "")).strip()
-        command = str(item.get("command", "")).strip()
-        if not key or not command:
-            raise ValueError(f"labwc.bindings[{index}] requires key and command")
+        command_raw = item.get("command")
+        action_raw = item.get("action")
+        comment_raw = item.get("comment")
+        command = str(command_raw).strip() if command_raw is not None else None
+        action = str(action_raw).strip() if action_raw is not None else None
+        comment = str(comment_raw).strip() if comment_raw is not None else None
+        if not key:
+            raise ValueError(f"labwc.bindings[{index}] requires key")
+        if bool(command) == bool(action):
+            raise ValueError(
+                f"labwc.bindings[{index}] requires exactly one of command or action"
+            )
         if key in labwc_keys:
             raise ValueError(f"duplicate labwc binding for key {key}")
         labwc_keys.add(key)
-        labwc_bindings.append(LabwcBinding(key=key, command=command))
+        attributes = {
+            str(attr_key): str(attr_value).strip()
+            for attr_key, attr_value in item.items()
+            if attr_key not in {"key", "command", "action", "comment"}
+        }
+        labwc_bindings.append(
+            LabwcBinding(
+                key=key,
+                command=command,
+                action=action,
+                attributes=attributes,
+                comment=comment or None,
+            )
+        )
 
     return rightshift_bindings, labwc_bindings
 
@@ -124,9 +148,17 @@ def render_labwc(bindings: list[LabwcBinding]) -> str:
     for binding in bindings:
         if binding.comment:
             lines.append(f"<!-- {binding.comment} -->")
-        command = html.escape(expand_command_home(binding.command), quote=True)
         lines.append(f'<keybind key="{binding.key}">')
-        lines.append(f'  <action name="Execute" command="{command}" />')
+        if binding.command:
+            command = html.escape(expand_command_home(binding.command), quote=True)
+            lines.append(f'  <action name="Execute" command="{command}" />')
+        else:
+            action_name = html.escape(binding.action or "", quote=True)
+            attrs = "".join(
+                f' {html.escape(name, quote=True)}="{html.escape(value, quote=True)}"'
+                for name, value in sorted(binding.attributes.items())
+            )
+            lines.append(f'  <action name="{action_name}"{attrs} />')
         lines.append("</keybind>")
     lines.append(LABWC_END_MARKER)
     return "\n".join(lines) + "\n"

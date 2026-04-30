@@ -8,6 +8,7 @@ export DISPLAY="${DISPLAY:-:0}"
 TITLE="codex-buddy uConsole"
 APP_ID="github.com.vxider.codex-buddy.uconsole"
 WLRCTL="${HOME}/.local/bin/wlrctl"
+SESSION_LAUNCHER="/usr/local/bin/uconsole-launch-in-session"
 STATE_DIR="${XDG_RUNTIME_DIR}/uconsole-mapper"
 WATCH_TOKEN_FILE="${STATE_DIR}/codex-buddy-focus-watch.token"
 WINDOW_SPECS=(
@@ -122,6 +123,10 @@ if [[ -x "$WLRCTL" ]]; then
   fi
 fi
 
-"${COMMAND[@]}" >/dev/null 2>&1 &
+if [[ -x "$SESSION_LAUNCHER" ]]; then
+  "$SESSION_LAUNCHER" "${COMMAND[@]}" >/dev/null 2>&1 &
+else
+  "${COMMAND[@]}" >/dev/null 2>&1 &
+fi
 fullscreen_window &
 start_focus_watcher

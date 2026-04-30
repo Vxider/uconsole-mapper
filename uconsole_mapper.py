@@ -6,10 +6,10 @@ import argparse
 import asyncio
 import logging
 import os
+import subprocess
 import shlex
 import shutil
 import signal
-import subprocess
 import sys
 import time
 import tomllib
@@ -187,10 +187,47 @@ class ActionRunner:
     def __init__(self) -> None:
         self._last_run: dict[str, float] = {}
         self._env = os.environ.copy()
-        self._env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{os.getuid()}")
+        self._hydrate_session_env()
+        self._wtype_path = shutil.which("wtype")
+
+    def _hydrate_session_env(self) -> None:
+        uid = os.getuid()
+        self._env.setdefault("XDG_RUNTIME_DIR", f"/run/user/{uid}")
+        session_env = self._read_systemd_user_environment()
+        for key in ("WAYLAND_DISPLAY", "DISPLAY", "DBUS_SESSION_BUS_ADDRESS"):
+            value = session_env.get(key)
+            if value:
+                self._env[key] = value
         self._env.setdefault("WAYLAND_DISPLAY", "wayland-0")
         self._env.setdefault("DISPLAY", ":0")
-        self._wtype_path = shutil.which("wtype")
+        self._env.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path=/run/user/{uid}/bus")
+
+    def _read_systemd_user_environment(self) -> dict[str, str]:
+        try:
+            result = subprocess.run(
+                ["systemctl", "--user", "show-environment"],
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        except OSError as exc:
+            LOGGER.debug("unable to read systemd user environment: %s", exc)
+            return {}
+
+        if result.returncode != 0:
+            LOGGER.debug(
+                "systemctl --user show-environment failed: rc=%s stderr=%s",
+                result.returncode,
+                result.stderr.strip(),
+            )
+            return {}
+
+        session_env: dict[str, str] = {}
+        for line in result.stdout.splitlines():
+            key, sep, value = line.partition("=")
+            if sep and key:
+                session_env[key] = value
+        return session_env
 
     def run(self, binding: Binding, debounce_ms: int) -> None:
         key = self._binding_key(binding)

@@ -7,7 +7,7 @@
 - `BTN_TRIGGER` (right-side `X`) manages `codex-buddy` and makes new windows fullscreen
 - `BTN_TOP` (right-side `Y`) manages `QuickTerm`
 - `BTN_THUMB` (right-side `A`) types `继续` and presses Enter after a `700ms` hold
-- Desktop keybind integration keeps `RightShift+C` for Chromium, `RightShift+D` for `~/zDesktop`, `RightShift+F` for the file manager, and `RightShift+V` for VS Code through generated `keyd -> session launcher` bindings, and installs `Shift+Enter` for terminal-style multiline input
+- Desktop keybind integration keeps `RightShift+C` for Chromium, `RightShift+D` for `~/zDesktop`, `RightShift+F` for the file manager, and `RightShift+V` for VS Code through generated `keyd -> session launcher` bindings, installs `Shift+Enter` for terminal-style multiline input, and maps `Ctrl+Alt+Enter` to maximize the focused window
 - Mouse `BTN_MIDDLE` is remapped to `BTN_LEFT`
 
 The project uses a "daemon + configuration" design, which makes it easier to add combo bindings or custom actions than continuing to stack more `input-remapper` rules.
@@ -199,6 +199,10 @@ command = "~/.local/bin/run-or-raise-vscode"
 [[labwc.bindings]]
 key = "S-Return"
 command = "~/.local/bin/shift-enter-newline"
+
+[[labwc.bindings]]
+key = "C-A-Return"
+action = "Maximize"
 ```
 
 Generated default behavior:
@@ -208,6 +212,7 @@ Generated default behavior:
 - `RightShift+F`: `keyd` runs `/usr/local/bin/uconsole-launch-in-session ~/.local/bin/run-or-raise-filemanager`
 - `RightShift+V`: `keyd` runs `/usr/local/bin/uconsole-launch-in-session ~/.local/bin/run-or-raise-vscode`
 - `Shift+Enter`: `labwc` runs `~/.local/bin/shift-enter-newline`
+- `Ctrl+Alt+Enter`: `labwc` maximizes the focused window
 
 `install.sh` installs these pieces:
 
@@ -266,10 +271,17 @@ Example `voice.env`:
 
 ```bash
 WHISPER_URL=http://127.0.0.1:3300/api/asr/transcriptions
-VOICE_OUTPUT_MODE=type
+VOICE_OUTPUT_MODE=fcitx_commit
+VOICE_TMUX_OUTPUT_MODE=type
+VOICE_TYPE_BACKEND=auto
+VOICE_TMUX_TYPE_BACKEND=wtype
+VOICE_PASTE_SHORTCUT=shift_insert
+VOICE_PASTE_BACKEND=auto
 VOICE_NOTIFY_USE_MARKUP=0
 VOICE_NOTIFY_FONT_SIZE=16
 VOICE_NOTIFY_PADDING_LINES=1
+VOICE_ESC_CANCEL=1
+VOICE_PYTHON_BIN=/usr/bin/python3
 ```
 
 Optional ASR request variables:
@@ -298,6 +310,8 @@ Script behavior:
 
 - `start`: starts recording
 - `stop`: stops recording, uploads the audio to Whisper, retrieves the transcript, and injects it into the currently focused input field
+- `cancel`: stops the active recording and deletes the audio without sending it to ASR
+- while recording, `Esc` runs the same cancel path by default; set `VOICE_ESC_CANCEL=0` to disable it. ESC monitoring uses `VOICE_PYTHON_BIN`, which defaults to `/usr/bin/python3`.
 - if the focused input is a tmux terminal window, the script captures the current active tmux pane visible text; if that is shorter than the minimum line budget, it falls back to the most recent lines before sending the context multipart field for correction
 
 Supported output modes:
@@ -305,7 +319,18 @@ Supported output modes:
 - `type`: types the text directly through `wtype`
 - `type_enter`: types the text and then presses Enter
 - `clipboard`: writes only to the clipboard
-- `paste`: writes to the clipboard first, then simulates `Ctrl+V`
+- `paste`: writes to the clipboard first, then simulates a configurable paste shortcut
+- `fcitx_commit`: writes the text to a pending file and asks an `fcitx5-lua` bridge to commit it into the currently focused input context
+
+Window-specific behavior:
+
+- non-tmux windows use `VOICE_OUTPUT_MODE`; `fcitx_commit` is the most input-method-like path when `wtype` / `ydotool` are not accepted by the target app
+- tmux / QuickTerm use `VOICE_TMUX_OUTPUT_MODE`; the default is `type`, so shell apps still receive direct text input and tmux context correction keeps working
+- `VOICE_TYPE_BACKEND=auto` prefers `ydotool` when its socket is available, otherwise falls back to `wtype`
+- `VOICE_TMUX_TYPE_BACKEND` defaults to `wtype`, so tmux keeps the previous direct-text path unless you explicitly change it
+- `VOICE_PASTE_SHORTCUT` defaults to `shift_insert`, which is more reliable than synthetic `Ctrl+V` in some Wayland browser setups
+- `VOICE_PASTE_BACKEND=auto` prefers `ydotool` when its socket is available, otherwise falls back to `wtype`
+- this also avoids the Chromium-side issue where direct virtual-keyboard typing can land as key positions such as `1234567890`
 
 Notification behavior:
 

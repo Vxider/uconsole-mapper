@@ -22,3 +22,7 @@ command = "~/.local/bin/run-or-raise-vscode"
 [[labwc.bindings]]
 key = "S-Return"
 command = "~/.local/bin/shift-enter-newline"
+
+[[labwc.bindings]]
+key = "C-A-Return"
+action = "Maximize"
