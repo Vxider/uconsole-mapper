@@ -280,8 +280,6 @@ VOICE_PASTE_BACKEND=auto
 VOICE_NOTIFY_USE_MARKUP=0
 VOICE_NOTIFY_FONT_SIZE=16
 VOICE_NOTIFY_PADDING_LINES=1
-VOICE_ESC_CANCEL=1
-VOICE_PYTHON_BIN=/usr/bin/python3
 ```
 
 Optional ASR request variables:
@@ -311,7 +309,6 @@ Script behavior:
 - `start`: starts recording
 - `stop`: stops recording, uploads the audio to Whisper, retrieves the transcript, and injects it into the currently focused input field
 - `cancel`: stops the active recording and deletes the audio without sending it to ASR
-- while recording, `Esc` runs the same cancel path by default; set `VOICE_ESC_CANCEL=0` to disable it. ESC monitoring uses `VOICE_PYTHON_BIN`, which defaults to `/usr/bin/python3`.
 - if the focused input is a tmux terminal window, the script captures the current active tmux pane visible text; if that is shorter than the minimum line budget, it falls back to the most recent lines before sending the context multipart field for correction
 
 Supported output modes:

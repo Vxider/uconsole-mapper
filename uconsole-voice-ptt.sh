@@ -43,8 +43,6 @@ Supported variables:
   VOICE_CHANNELS         default: 1
   VOICE_STATE_DIR        default: ${XDG_STATE_HOME:-~/.local/state}/uconsole-mapper
   VOICE_KEEP_AUDIO       1 keeps recorded audio after stop, default: 0
-  VOICE_ESC_CANCEL       1 allows Esc to cancel the active recording, default: 1
-  VOICE_PYTHON_BIN       Python used for Esc key monitoring, default: /usr/bin/python3
   VOICE_NOTIFY_USE_MARKUP
                          1 enables Pango markup for notifications, default: 0
   VOICE_NOTIFY_FONT_SIZE notification font size when markup is enabled, default: 16
@@ -86,9 +84,6 @@ close_status() {
 
 show_recording_status() {
   local body="录音中..."
-  if [[ "${VOICE_ESC_CANCEL}" == "1" ]]; then
-    body="录音中... ESC 取消"
-  fi
 
   if command -v dunstify >/dev/null 2>&1; then
     dunstify \
@@ -224,106 +219,6 @@ wait_for_exit() {
     elapsed=$((elapsed + 1))
   done
   return 0
-}
-
-kill_escape_watcher() {
-  local watcher_pid=${ESC_WATCHER_PID:-}
-  [[ -n "${watcher_pid}" ]] || return 0
-  [[ "${watcher_pid}" != "$$" ]] || return 0
-  kill -TERM "${watcher_pid}" >/dev/null 2>&1 || true
-  wait_for_exit "${watcher_pid}" 10 || true
-}
-
-wait_for_escape_key() {
-  [[ -x "${VOICE_PYTHON_BIN}" ]] || return 1
-  "${VOICE_PYTHON_BIN}" - <<'PY'
-import select
-import sys
-import time
-
-try:
-    from evdev import InputDevice, ecodes, list_devices
-except Exception:
-    sys.exit(1)
-
-
-def open_escape_devices():
-    devices = []
-    for path in list_devices():
-        try:
-            device = InputDevice(path)
-            keys = device.capabilities().get(ecodes.EV_KEY, [])
-        except OSError:
-            continue
-        if ecodes.KEY_ESC in keys:
-            devices.append(device)
-        else:
-            device.close()
-    return devices
-
-
-devices = open_escape_devices()
-last_scan = time.monotonic()
-
-while True:
-    if not devices:
-        time.sleep(1)
-        devices = open_escape_devices()
-        continue
-
-    try:
-        ready, _, _ = select.select(devices, [], [], 1)
-    except OSError:
-        for device in devices:
-            try:
-                device.close()
-            except OSError:
-                pass
-        devices = open_escape_devices()
-        continue
-
-    for device in ready:
-        try:
-            events = device.read()
-        except OSError:
-            try:
-                device.close()
-            except OSError:
-                pass
-            devices = [item for item in devices if item.fd != device.fd]
-            continue
-        for event in events:
-            if event.type == ecodes.EV_KEY and event.code == ecodes.KEY_ESC and event.value == 1:
-                sys.exit(0)
-
-    if time.monotonic() - last_scan > 5:
-        known_paths = {device.path for device in devices}
-        for device in open_escape_devices():
-            if device.path in known_paths:
-                device.close()
-            else:
-                devices.append(device)
-        last_scan = time.monotonic()
-PY
-}
-
-watch_escape_cancel() {
-  local child_pid=
-
-  cleanup_escape_child() {
-    if [[ -n "${child_pid}" ]]; then
-      kill -TERM "${child_pid}" >/dev/null 2>&1 || true
-    fi
-  }
-
-  trap cleanup_escape_child TERM INT HUP EXIT
-  wait_for_escape_key &
-  child_pid=$!
-  if wait "${child_pid}"; then
-    child_pid=
-    trap - TERM INT HUP EXIT
-    cancel_recording "按下 ESC，已取消"
-  fi
 }
 
 choose_recorder() {
@@ -545,13 +440,6 @@ AUDIO_FILE=$(printf '%q' "${audio_file}")
 RECORDER_NAME=${recorder}
 STARTED_AT_MS=$(date +%s%3N)
 EOF
-  if [[ "${VOICE_ESC_CANCEL}" == "1" ]]; then
-    "${BASH_SOURCE[0]}" watch-esc >/dev/null 2>&1 &
-    local esc_watcher_pid=$!
-    cat >>"${STATE_FILE}" <<EOF
-ESC_WATCHER_PID=${esc_watcher_pid}
-EOF
-  fi
   show_recording_status
 }
 
@@ -605,7 +493,6 @@ stop_recording() {
   # shellcheck disable=SC1090
   source "${STATE_FILE}"
   rm -f "${STATE_FILE}"
-  kill_escape_watcher
 
   if [[ -z "${RECORDER_PID:-}" || -z "${AUDIO_FILE:-}" ]]; then
     echo "state file is incomplete" >&2
@@ -729,7 +616,6 @@ cancel_recording() {
   # shellcheck disable=SC1090
   source "${STATE_FILE}"
   rm -f "${STATE_FILE}"
-  kill_escape_watcher
 
   if [[ -n "${RECORDER_PID:-}" ]] && kill -0 "${RECORDER_PID}" >/dev/null 2>&1; then
     kill -INT "${RECORDER_PID}" >/dev/null 2>&1 || true
@@ -767,8 +653,6 @@ VOICE_SAMPLE_RATE=${VOICE_SAMPLE_RATE:-16000}
 VOICE_CHANNELS=${VOICE_CHANNELS:-1}
 VOICE_OUTPUT_MODE=${VOICE_OUTPUT_MODE:-type}
 VOICE_KEEP_AUDIO=${VOICE_KEEP_AUDIO:-0}
-VOICE_ESC_CANCEL=${VOICE_ESC_CANCEL:-1}
-VOICE_PYTHON_BIN=${VOICE_PYTHON_BIN:-/usr/bin/python3}
 VOICE_NOTIFY_ID=${VOICE_NOTIFY_ID:-991199}
 VOICE_NOTIFY_USE_MARKUP=${VOICE_NOTIFY_USE_MARKUP:-0}
 VOICE_NOTIFY_FONT_SIZE=${VOICE_NOTIFY_FONT_SIZE:-16}
@@ -799,9 +683,6 @@ case "${ACTION}" in
     ;;
   cancel)
     cancel_recording
-    ;;
-  watch-esc)
-    watch_escape_cancel
     ;;
   *)
     echo "unknown action: ${ACTION}" >&2
