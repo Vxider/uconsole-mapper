@@ -35,6 +35,7 @@ Supported variables:
                          1 sends enableCorrection=true, default: 1
   WHISPER_TEXT_JQ        jq expression, default: .text // .result.text // .data.text // empty
   WHISPER_NO_PROXY       1 disables proxy for whisper requests, default: 1
+  WHISPER_TIMEOUT        ASR request timeout in seconds, default: 30; 0 disables
   VOICE_OUTPUT_MODE      type | type_enter | clipboard | paste, default: type
   VOICE_RECORDER         auto | pw-record | ffmpeg | arecord, default: auto
   VOICE_INPUT            default audio input name, used by ffmpeg, default: default
@@ -45,7 +46,7 @@ Supported variables:
   VOICE_KEEP_AUDIO       1 keeps recorded audio after stop, default: 0
   VOICE_NOTIFY_USE_MARKUP
                          1 enables Pango markup for notifications, default: 0
-  VOICE_NOTIFY_FONT_SIZE notification font size when markup is enabled, default: 16
+  VOICE_NOTIFY_FONT_SIZE notification font size when markup is enabled, default: 22
   VOICE_NOTIFY_PADDING_LINES
                         extra blank lines for a taller notification, default: 1
   VOICE_TMUX_CONTEXT     1 adds active tmux pane visible text as ASR context, default: 1
@@ -550,6 +551,7 @@ stop_recording() {
   local context_text=
   local -a curl_args=(
     -fsS
+    --max-time "${WHISPER_TIMEOUT}"
     -X POST
     "${WHISPER_URL}"
     -F "file=@${AUDIO_FILE}"
@@ -580,8 +582,14 @@ stop_recording() {
   fi
 
   show_status "uconsole voice" "识别中..." "65" "0"
-  if ! run_whisper_curl "${curl_args[@]}" >"${response_file}"; then
-    show_status "uconsole voice" "Whisper 请求失败" "0" "1200"
+  local curl_status=0
+  run_whisper_curl "${curl_args[@]}" >"${response_file}" || curl_status=$?
+  if (( curl_status != 0 )); then
+    if (( curl_status == 28 )); then
+      show_status "uconsole voice" "识别超时" "0" "1200"
+    else
+      show_status "uconsole voice" "Whisper 请求失败" "0" "1200"
+    fi
     rm -f "${response_file}"
     [[ "${VOICE_KEEP_AUDIO}" == "1" ]] || rm -f "${AUDIO_FILE}"
     exit 1
@@ -655,7 +663,7 @@ VOICE_OUTPUT_MODE=${VOICE_OUTPUT_MODE:-type}
 VOICE_KEEP_AUDIO=${VOICE_KEEP_AUDIO:-0}
 VOICE_NOTIFY_ID=${VOICE_NOTIFY_ID:-991199}
 VOICE_NOTIFY_USE_MARKUP=${VOICE_NOTIFY_USE_MARKUP:-0}
-VOICE_NOTIFY_FONT_SIZE=${VOICE_NOTIFY_FONT_SIZE:-16}
+VOICE_NOTIFY_FONT_SIZE=${VOICE_NOTIFY_FONT_SIZE:-22}
 VOICE_NOTIFY_PADDING_LINES=${VOICE_NOTIFY_PADDING_LINES:-1}
 VOICE_NOTIFY_FONT_SIZE_PANGO=$((VOICE_NOTIFY_FONT_SIZE * 1000))
 VOICE_TMUX_CONTEXT=${VOICE_TMUX_CONTEXT:-1}
@@ -673,6 +681,7 @@ WHISPER_CONTEXT_FIELD=${WHISPER_CONTEXT_FIELD:-contextText}
 WHISPER_ENABLE_CORRECTION=${WHISPER_ENABLE_CORRECTION:-1}
 WHISPER_TEXT_JQ=${WHISPER_TEXT_JQ:-'.text // .result.text // .data.text // empty'}
 WHISPER_NO_PROXY=${WHISPER_NO_PROXY:-1}
+WHISPER_TIMEOUT=${WHISPER_TIMEOUT:-30}
 
 case "${ACTION}" in
   start)

@@ -278,7 +278,7 @@ VOICE_TMUX_TYPE_BACKEND=wtype
 VOICE_PASTE_SHORTCUT=shift_insert
 VOICE_PASTE_BACKEND=auto
 VOICE_NOTIFY_USE_MARKUP=0
-VOICE_NOTIFY_FONT_SIZE=16
+VOICE_NOTIFY_FONT_SIZE=22
 VOICE_NOTIFY_PADDING_LINES=1
 ```
 
@@ -297,6 +297,8 @@ Optional ASR request variables:
 # WHISPER_CONTEXT_FIELD=contextText
 # Ask the ASR service to run correction. Defaults to 1.
 # WHISPER_ENABLE_CORRECTION=1
+# ASR request timeout in seconds. Defaults to 30; use 0 to disable.
+# WHISPER_TIMEOUT=30
 # Include the current tmux active pane visible text when a tmux terminal is focused.
 VOICE_TMUX_CONTEXT=1
 # If the visible area is too short, fall back to at least this many recent lines.
@@ -334,7 +336,7 @@ Notification behavior:
 - while recording / transcribing, the script updates a single persistent status notification
 - after successful transcription injection, the notification is closed instead of showing the recognized text
 - `VOICE_NOTIFY_USE_MARKUP` defaults to `0`; enable it only if the notification daemon correctly renders Pango markup
-- `VOICE_NOTIFY_FONT_SIZE` defaults to `16` and only applies when markup is enabled
+- `VOICE_NOTIFY_FONT_SIZE` defaults to `22` and only applies when markup is enabled
 - `VOICE_NOTIFY_PADDING_LINES` defaults to `1` to make the notification taller
 
 If the `B` button on the device is not `BTN_THUMB2`, check the service logs or temporarily run `evtest` / `libinput debug-events` to confirm the actual key code before updating the configuration.
