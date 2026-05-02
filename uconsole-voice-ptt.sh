@@ -32,8 +32,10 @@ Supported variables:
   VOICE_GLOSSARY_FILE    glossary file path, one term per line; default:
                          ~/.config/uconsole-mapper/voice-glossary.txt
   WHISPER_CONTEXT_FIELD  multipart field for tmux context, default: contextText
+  WHISPER_CORRECTION_MODE
+                         off | on | auto, default: auto
   WHISPER_ENABLE_CORRECTION
-                         1 sends enableCorrection=true, default: 0
+                         legacy compatibility; 1 maps to correctionMode=on, 0 maps to off
   WHISPER_TEXT_JQ        jq expression, default: .data.text // .text // .result.text // empty
   WHISPER_NO_PROXY       1 disables proxy for whisper requests, default: 1
   WHISPER_TIMEOUT        ASR request timeout in seconds, default: 30; 0 disables
@@ -566,7 +568,9 @@ stop_recording() {
   if [[ -n "${WHISPER_LANGUAGE}" ]]; then
     curl_args+=(-F "language=${WHISPER_LANGUAGE}")
   fi
-  if [[ "${WHISPER_ENABLE_CORRECTION}" == "1" ]]; then
+  if [[ -n "${WHISPER_CORRECTION_MODE}" ]]; then
+    curl_args+=(-F "correctionMode=${WHISPER_CORRECTION_MODE}")
+  elif [[ "${WHISPER_ENABLE_CORRECTION}" == "1" ]]; then
     curl_args+=(-F "enableCorrection=true")
   fi
   prompt_text=$(build_whisper_prompt || true)
@@ -680,7 +684,17 @@ WHISPER_PROMPT=${WHISPER_PROMPT:-}
 WHISPER_PROMPT_FIELD=${WHISPER_PROMPT_FIELD:-prompt}
 WHISPER_PROMPT_GLOSSARY_FIELD=${WHISPER_PROMPT_GLOSSARY_FIELD:-promptGlossary}
 WHISPER_CONTEXT_FIELD=${WHISPER_CONTEXT_FIELD:-contextText}
-WHISPER_ENABLE_CORRECTION=${WHISPER_ENABLE_CORRECTION:-0}
+WHISPER_ENABLE_CORRECTION=${WHISPER_ENABLE_CORRECTION:-}
+WHISPER_CORRECTION_MODE=${WHISPER_CORRECTION_MODE:-}
+if [[ -z "${WHISPER_CORRECTION_MODE}" ]]; then
+  if [[ "${WHISPER_ENABLE_CORRECTION}" == "1" ]]; then
+    WHISPER_CORRECTION_MODE=on
+  elif [[ "${WHISPER_ENABLE_CORRECTION}" == "0" ]]; then
+    WHISPER_CORRECTION_MODE=off
+  else
+    WHISPER_CORRECTION_MODE=auto
+  fi
+fi
 WHISPER_TEXT_JQ=${WHISPER_TEXT_JQ:-'.data.text // .text // .result.text // empty'}
 WHISPER_NO_PROXY=${WHISPER_NO_PROXY:-1}
 WHISPER_TIMEOUT=${WHISPER_TIMEOUT:-30}

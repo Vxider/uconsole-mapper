@@ -279,7 +279,7 @@ WHISPER_URL=http://127.0.0.1:3300/api/asr/transcriptions
 WHISPER_MODEL=faster-whisper-small
 WHISPER_MODEL_FIELD=modelId
 WHISPER_LANGUAGE=zh
-WHISPER_ENABLE_CORRECTION=0
+WHISPER_CORRECTION_MODE=auto
 VOICE_OUTPUT_MODE=fcitx_commit
 VOICE_TMUX_OUTPUT_MODE=type
 VOICE_TYPE_BACKEND=auto
@@ -306,7 +306,9 @@ Optional ASR request variables:
 # WHISPER_CONTEXT_FIELD=contextText
 # Multipart field name for the transcription model id. Use modelId for FlashAI asr_server.
 # WHISPER_MODEL_FIELD=modelId
-# Ask the ASR service to run correction. Defaults to 0 for low-latency ASR.
+# ASR correction mode: off | on | auto. Auto keeps normal text fast and corrects code/command mixed input.
+# WHISPER_CORRECTION_MODE=auto
+# Legacy compatibility only; prefer WHISPER_CORRECTION_MODE.
 # WHISPER_ENABLE_CORRECTION=0
 # ASR request timeout in seconds. Defaults to 30; use 0 to disable.
 # WHISPER_TIMEOUT=30
