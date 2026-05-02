@@ -26,3 +26,7 @@ command = "~/.local/bin/shift-enter-newline"
 [[labwc.bindings]]
 key = "C-A-Return"
 action = "Maximize"
+
+[[labwc.bindings]]
+key = "C-A-d"
+command = "~/.local/bin/uconsole-show-desktop"

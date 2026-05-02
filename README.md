@@ -203,6 +203,10 @@ command = "~/.local/bin/shift-enter-newline"
 [[labwc.bindings]]
 key = "C-A-Return"
 action = "Maximize"
+
+[[labwc.bindings]]
+key = "C-A-d"
+command = "~/.local/bin/uconsole-show-desktop"
 ```
 
 Generated default behavior:
@@ -213,6 +217,7 @@ Generated default behavior:
 - `RightShift+V`: `keyd` runs `/usr/local/bin/uconsole-launch-in-session ~/.local/bin/run-or-raise-vscode`
 - `Shift+Enter`: `labwc` runs `~/.local/bin/shift-enter-newline`
 - `Ctrl+Alt+Enter`: `labwc` maximizes the focused window
+- `Ctrl+Alt+D`: `labwc` runs `~/.local/bin/uconsole-show-desktop`
 
 `install.sh` installs these pieces:
 
@@ -271,6 +276,10 @@ Example `voice.env`:
 
 ```bash
 WHISPER_URL=http://127.0.0.1:3300/api/asr/transcriptions
+WHISPER_MODEL=faster-whisper-small
+WHISPER_MODEL_FIELD=modelId
+WHISPER_LANGUAGE=zh
+WHISPER_ENABLE_CORRECTION=0
 VOICE_OUTPUT_MODE=fcitx_commit
 VOICE_TMUX_OUTPUT_MODE=type
 VOICE_TYPE_BACKEND=auto
@@ -295,8 +304,10 @@ Optional ASR request variables:
 # VOICE_GLOSSARY_FILE=~/.config/uconsole-mapper/voice-glossary.txt
 # Multipart field name for tmux context sent to correction. Defaults to contextText.
 # WHISPER_CONTEXT_FIELD=contextText
-# Ask the ASR service to run correction. Defaults to 1.
-# WHISPER_ENABLE_CORRECTION=1
+# Multipart field name for the transcription model id. Use modelId for FlashAI asr_server.
+# WHISPER_MODEL_FIELD=modelId
+# Ask the ASR service to run correction. Defaults to 0 for low-latency ASR.
+# WHISPER_ENABLE_CORRECTION=0
 # ASR request timeout in seconds. Defaults to 30; use 0 to disable.
 # WHISPER_TIMEOUT=30
 # Include the current tmux active pane visible text when a tmux terminal is focused.

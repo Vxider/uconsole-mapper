@@ -57,6 +57,8 @@ install -m 0755 "${SCRIPT_DIR}/run-or-raise-chromium.sh" "${BIN_DIR}/run-or-rais
 install -m 0755 "${SCRIPT_DIR}/run-or-raise-filemanager.sh" "${BIN_DIR}/run-or-raise-filemanager"
 install -m 0755 "${SCRIPT_DIR}/run-or-raise-vscode.sh" "${BIN_DIR}/run-or-raise-vscode"
 install -m 0755 "${SCRIPT_DIR}/run-or-raise-zdesktop.sh" "${BIN_DIR}/run-or-raise-zdesktop"
+install -m 0755 "${SCRIPT_DIR}/show-desktop.sh" "${BIN_DIR}/uconsole-show-desktop"
+install -m 0755 "${SCRIPT_DIR}/esc-switch-ime-english.sh" "${BIN_DIR}/esc-switch-ime-english"
 install -m 0755 "${SCRIPT_DIR}/shift-enter-newline.sh" "${BIN_DIR}/shift-enter-newline"
 install -m 0755 "${SCRIPT_DIR}/uconsole-voice-ptt.sh" "${BIN_DIR}/uconsole-voice-ptt"
 install -m 0755 "${SCRIPT_DIR}/generate_desktop_keybinds.py" "${APP_DIR}/generate_desktop_keybinds.py"

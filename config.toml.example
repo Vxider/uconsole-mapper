@@ -32,10 +32,16 @@ press_enter = true
 # release_command = "~/.local/bin/uconsole-voice-ptt stop"
 
 [keyboard]
-enabled = false
+enabled = true
 grab = false
-device_name_patterns = ["ClockworkPI uConsole Keyboard"]
+device_name_patterns = ["ClockworkPI uConsole Keyboard", "keyd virtual keyboard", "uconsole-sleep-keyboard"]
 debounce_ms = 250
+
+# With grab disabled, bindings run side effects without intercepting the
+# original key press. Esc still reaches the focused application.
+[[keyboard.bindings]]
+buttons = ["KEY_ESC"]
+command = "~/.local/bin/esc-switch-ime-english"
 
 # Legacy keyboard interception mode is available, but disabled by default.
 # Prefer keyd + labwc for keyboard shortcuts so normal typing does not depend

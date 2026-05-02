@@ -21,7 +21,8 @@ Configuration is read from:
 
 Supported variables:
   WHISPER_URL            required, whisper endpoint
-  WHISPER_MODEL          optional multipart field
+  WHISPER_MODEL          optional transcription model id
+  WHISPER_MODEL_FIELD    multipart field for model id, default: model
   WHISPER_LANGUAGE       optional multipart field
   WHISPER_AUTH_TOKEN     optional bearer token
   WHISPER_PROMPT         optional short ASR prompt hint
@@ -32,8 +33,8 @@ Supported variables:
                          ~/.config/uconsole-mapper/voice-glossary.txt
   WHISPER_CONTEXT_FIELD  multipart field for tmux context, default: contextText
   WHISPER_ENABLE_CORRECTION
-                         1 sends enableCorrection=true, default: 1
-  WHISPER_TEXT_JQ        jq expression, default: .text // .result.text // .data.text // empty
+                         1 sends enableCorrection=true, default: 0
+  WHISPER_TEXT_JQ        jq expression, default: .data.text // .text // .result.text // empty
   WHISPER_NO_PROXY       1 disables proxy for whisper requests, default: 1
   WHISPER_TIMEOUT        ASR request timeout in seconds, default: 30; 0 disables
   VOICE_OUTPUT_MODE      type | type_enter | clipboard | paste, default: type
@@ -560,7 +561,7 @@ stop_recording() {
     curl_args+=(-H "Authorization: Bearer ${WHISPER_AUTH_TOKEN}")
   fi
   if [[ -n "${WHISPER_MODEL}" ]]; then
-    curl_args+=(-F "model=${WHISPER_MODEL}")
+    curl_args+=(-F "${WHISPER_MODEL_FIELD}=${WHISPER_MODEL}")
   fi
   if [[ -n "${WHISPER_LANGUAGE}" ]]; then
     curl_args+=(-F "language=${WHISPER_LANGUAGE}")
@@ -672,14 +673,15 @@ VOICE_TMUX_CONTEXT_MAX_CHARS=${VOICE_TMUX_CONTEXT_MAX_CHARS:-1200}
 WLRCTL=${WLRCTL:-"${HOME}/.local/bin/wlrctl"}
 WHISPER_URL=${WHISPER_URL:-}
 WHISPER_MODEL=${WHISPER_MODEL:-}
+WHISPER_MODEL_FIELD=${WHISPER_MODEL_FIELD:-model}
 WHISPER_LANGUAGE=${WHISPER_LANGUAGE:-}
 WHISPER_AUTH_TOKEN=${WHISPER_AUTH_TOKEN:-}
 WHISPER_PROMPT=${WHISPER_PROMPT:-}
 WHISPER_PROMPT_FIELD=${WHISPER_PROMPT_FIELD:-prompt}
 WHISPER_PROMPT_GLOSSARY_FIELD=${WHISPER_PROMPT_GLOSSARY_FIELD:-promptGlossary}
 WHISPER_CONTEXT_FIELD=${WHISPER_CONTEXT_FIELD:-contextText}
-WHISPER_ENABLE_CORRECTION=${WHISPER_ENABLE_CORRECTION:-1}
-WHISPER_TEXT_JQ=${WHISPER_TEXT_JQ:-'.text // .result.text // .data.text // empty'}
+WHISPER_ENABLE_CORRECTION=${WHISPER_ENABLE_CORRECTION:-0}
+WHISPER_TEXT_JQ=${WHISPER_TEXT_JQ:-'.data.text // .text // .result.text // empty'}
 WHISPER_NO_PROXY=${WHISPER_NO_PROXY:-1}
 WHISPER_TIMEOUT=${WHISPER_TIMEOUT:-30}
 
