@@ -28,5 +28,5 @@ key = "C-A-Return"
 action = "Maximize"
 
 [[labwc.bindings]]
-key = "C-A-d"
-command = "~/.local/bin/uconsole-show-desktop"
+key = "C-A-h"
+action = "Iconify"
