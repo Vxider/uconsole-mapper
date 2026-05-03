@@ -96,12 +96,14 @@ if command -v labwc >/dev/null 2>&1; then
   labwc --reconfigure >/dev/null 2>&1 || true
 fi
 
-if command -v keyd >/dev/null 2>&1 || [[ -d /etc/keyd ]]; then
+if command -v keyd >/dev/null 2>&1 || command -v keyd.rvaiya >/dev/null 2>&1 || [[ -d /etc/keyd ]]; then
   sudo install -d -m 0755 /etc/keyd
   sudo install -m 0644 "${APP_DIR}/keyd-uconsole-mapper" /etc/keyd/uconsole-mapper
   sudo "${PYTHON_BIN}" "${APP_DIR}/sync_keyd_default_conf.py"
   if command -v keyd >/dev/null 2>&1; then
     sudo keyd reload >/dev/null 2>&1 || sudo systemctl restart keyd >/dev/null 2>&1 || true
+  elif command -v keyd.rvaiya >/dev/null 2>&1; then
+    sudo keyd.rvaiya reload >/dev/null 2>&1 || sudo systemctl restart keyd >/dev/null 2>&1 || true
   fi
 fi
 

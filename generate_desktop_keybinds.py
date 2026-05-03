@@ -19,6 +19,13 @@ except ModuleNotFoundError:  # pragma: no cover
 LABWC_BEGIN_MARKER = "<!-- uconsole-mapper:keybinds begin -->"
 LABWC_END_MARKER = "<!-- uconsole-mapper:keybinds end -->"
 SESSION_LAUNCHER = "/usr/local/bin/uconsole-launch-in-session"
+RIGHTSHIFT_LAYER = "uconsole_rightshift"
+RIGHTSHIFT_PASSTHROUGH_MODIFIERS = {
+    "control": "C",
+    "alt": "A",
+    "meta": "M",
+    "altgr": "G",
+}
 
 
 @dataclass(slots=True)
@@ -131,16 +138,34 @@ def render_keyd(bindings: list[RightShiftBinding]) -> str:
     lines.extend(
         [
             "[main]",
-            "rightshift = layer(uconsole_rightshift)",
+            f"rightshift = layer({RIGHTSHIFT_LAYER})",
             "",
-            "[uconsole_rightshift:S]",
+            f"[{RIGHTSHIFT_LAYER}:S]",
         ]
     )
     for binding in bindings:
         launched = shlex.quote(expand_command_home(binding.command))
         lines.append(f"# RightShift+{binding.key.upper()} -> {binding.command}")
         lines.append(f"{binding.key} = command({SESSION_LAUNCHER} {launched})")
+    lines.extend(render_keyd_modifier_passthroughs(bindings))
     return "\n".join(lines) + "\n"
+
+
+def render_keyd_modifier_passthroughs(bindings: list[RightShiftBinding]) -> list[str]:
+    lines: list[str] = []
+    modifier_items = list(RIGHTSHIFT_PASSTHROUGH_MODIFIERS.items())
+    for mask in range(1, 1 << len(modifier_items)):
+        active = [
+            modifier_items[index]
+            for index in range(len(modifier_items))
+            if mask & (1 << index)
+        ]
+        layer_names = "+".join([RIGHTSHIFT_LAYER, *(name for name, _ in active)])
+        macro_modifiers = "-".join([*(modifier for _, modifier in active), "S"])
+        lines.extend(["", f"[{layer_names}]", f"# Preserve {macro_modifiers} on configured RightShift launcher keys."])
+        for binding in bindings:
+            lines.append(f"{binding.key} = {macro_modifiers}-{binding.key}")
+    return lines
 
 
 def render_labwc(bindings: list[LabwcBinding]) -> str:
