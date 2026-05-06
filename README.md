@@ -129,10 +129,10 @@ Current `toggle-codex-buddy` behavior:
 
 Current `toggle-lxterminal` behavior:
 
-- No `QuickTerm` window: opens a new `lxterminal --title=QuickTerm`
+- No `QuickTerm` window: opens a new `lxterminal --title=QuickTerm` in its own user scope
 - A `QuickTerm` window exists but is not focused: raises it to the foreground
 - `QuickTerm` is already focused: minimizes or hides it
-- `QuickTerm` loses focus: minimizes automatically so the next toggle returns to the desktop
+- Rapid duplicate button events are ignored to avoid toggling the window twice from one press
 
 If the service does not start, check these first:
 
