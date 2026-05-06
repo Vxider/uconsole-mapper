@@ -34,7 +34,7 @@ press_enter = true
 [keyboard]
 enabled = true
 grab = false
-device_name_patterns = ["ClockworkPI uConsole Keyboard", "keyd virtual keyboard", "uconsole-sleep-keyboard"]
+device_name_patterns = ["ClockworkPI uConsole Keyboard", "keyd virtual keyboard"]
 debounce_ms = 250
 
 # With grab disabled, bindings run side effects without intercepting the
