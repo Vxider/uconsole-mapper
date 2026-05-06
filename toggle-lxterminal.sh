@@ -11,6 +11,9 @@ APP_CLASS="QuickTerm"
 WLRCTL="${HOME}/.local/bin/wlrctl"
 STATE_DIR="${XDG_RUNTIME_DIR}/uconsole-mapper"
 WATCH_TOKEN_FILE="${STATE_DIR}/quickterm-focus-watch.token"
+INVOKE_GUARD_FILE="/tmp/quickterm-toggle-${UID}.last"
+MIN_TOGGLE_INTERVAL_MS="${MIN_TOGGLE_INTERVAL_MS:-900}"
+AUTO_HIDE_ON_FOCUS_LOSS="${AUTO_HIDE_ON_FOCUS_LOSS:-no}"
 WINDOW_SPECS=(
   "app_id:lxterminal"
   "app_id:${APP_CLASS}"
@@ -18,6 +21,26 @@ WINDOW_SPECS=(
   "app_id:${TITLE}"
   "title:${TITLE}"
 )
+
+now_millis() {
+  date +%s%3N
+}
+
+ignore_repeated_invocation() {
+  local now last
+
+  now="$(now_millis)"
+
+  if [[ -f "$INVOKE_GUARD_FILE" ]]; then
+    last="$(cat "$INVOKE_GUARD_FILE" 2>/dev/null || true)"
+    if [[ "$last" =~ ^[0-9]+$ ]] && (( now - last < MIN_TOGGLE_INTERVAL_MS )); then
+      return 0
+    fi
+  fi
+
+  printf '%s\n' "$now" >"$INVOKE_GUARD_FILE"
+  return 1
+}
 
 find_window_spec() {
   local spec
@@ -82,6 +105,7 @@ watch_focus_loss() {
 start_focus_watcher() {
   local token
 
+  [[ "$AUTO_HIDE_ON_FOCUS_LOSS" == "yes" ]] || return 0
   [[ -x "$WLRCTL" ]] || return 0
 
   mkdir -p "$STATE_DIR"
@@ -89,6 +113,10 @@ start_focus_watcher() {
   printf '%s\n' "$token" >"$WATCH_TOKEN_FILE"
   watch_focus_loss "$token" >/dev/null 2>&1 &
 }
+
+if ignore_repeated_invocation; then
+  exit 0
+fi
 
 if [[ -x "$WLRCTL" ]]; then
   if spec="$(find_window_spec)"; then
@@ -104,11 +132,14 @@ if [[ -x "$WLRCTL" ]]; then
   fi
 fi
 
-lxterminal \
-  --no-remote \
-  --name="${APP_NAME}" \
-  --class="${APP_CLASS}" \
-  --title="${TITLE}" \
+systemd-run --user --scope --quiet \
+  --unit="quickterm-$(date +%s%3N)" \
+  -E GTK_THEME=QuickTermTab10 \
+  lxterminal \
+    --no-remote \
+    --name="${APP_NAME}" \
+    --class="${APP_CLASS}" \
+    --title="${TITLE}" \
   >/dev/null 2>&1 &
 
 start_focus_watcher
