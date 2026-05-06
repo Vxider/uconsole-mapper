@@ -211,6 +211,10 @@ normalize_transcript() {
   tr '\r\n' '  ' | sed 's/[[:space:]]\+/ /g' | trim
 }
 
+sanitize_asr_context() {
+  perl -CS -0pe 's/[^\p{L}\p{N}\s]+/ /g; s/\s+/ /g; s/^ //; s/ $//'
+}
+
 wait_for_exit() {
   local pid=$1
   local timeout=$2
@@ -276,6 +280,12 @@ terminal_window_is_active() {
     fi
   done
 
+  for spec in "title:QuickTerm" "app_id:QuickTerm" "app_id:quickterm"; do
+    if "${WLRCTL}" window find "${spec}" >/dev/null 2>&1; then
+      return 0
+    fi
+  done
+
   return 1
 }
 
@@ -322,11 +332,11 @@ capture_tmux_window_context() {
     tmux display-message -p -t "${window_id}" '#{window_name}' 2>/dev/null | tr -d '\r' || true
   )
 
-  context=$(printf 'tmux session: %s\n' "${session_name:-unknown}")
-  context+=$(printf 'tmux window: %s\n' "${window_name:-${window_id}}")
+  context="tmux session: ${session_name:-unknown}"$'\n'
+  context+="tmux window: ${window_name:-${window_id}}"$'\n'
 
   IFS=$'\t' read -r pane_id pane_index pane_command < <(
-    tmux list-panes -t "${window_id}" -F '#{?pane_active,#{pane_id}\t#{pane_index}\t#{pane_current_command},}' 2>/dev/null \
+    tmux list-panes -t "${window_id}" -F '#{?pane_active,#{pane_id}'$'\t''#{pane_index}'$'\t''#{pane_current_command},}' 2>/dev/null \
       | awk 'NF { print; exit }'
   ) || true
   [[ -n "${pane_id}" ]] || return 1
@@ -344,11 +354,12 @@ capture_tmux_window_context() {
   [[ -n "${pane_text}" ]] || return 1
 
   context+=$'\n'
-  context+=$(printf '[active pane %s command=%s]\n' \
-    "${pane_index:-?}" \
-    "${pane_command:-unknown}")
+  context+="[active pane ${pane_index:-?} command=${pane_command:-unknown}]"$'\n'
   context+="${pane_text}"$'\n'
 
+  [[ -n "${context}" ]] || return 1
+
+  context=$(printf '%s\n' "${context}" | sanitize_asr_context)
   [[ -n "${context}" ]] || return 1
 
   if (( ${#context} > VOICE_TMUX_CONTEXT_MAX_CHARS )); then
