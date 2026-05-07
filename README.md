@@ -6,7 +6,7 @@
 
 - `BTN_TRIGGER` (right-side `X`) manages `codex-buddy` and makes new windows fullscreen
 - `BTN_TOP` (right-side `Y`) manages `QuickTerm`
-- `BTN_THUMB` (right-side `A`) types `继续` and presses Enter after a `700ms` hold
+- `BTN_THUMB` (right-side `A`) types `提交git` on short press
 - Desktop keybind integration keeps `RightShift+C` for Chromium, `RightShift+D` for `~/zDesktop`, `RightShift+F` for the file manager, and `RightShift+V` for VS Code through generated `keyd -> session launcher` bindings, installs `Shift+Enter` for terminal-style multiline input, and maps `Ctrl+Alt+Enter` to maximize the focused window
 - Mouse `BTN_MIDDLE` is remapped to `BTN_LEFT`
 
@@ -35,7 +35,7 @@ Sync this repository to the uConsole, then run:
 
 ```bash
 sudo apt update
-sudo apt install -y python3-evdev wtype curl jq
+sudo apt install -y python3-evdev wtype wl-clipboard curl jq
 sudo modprobe uinput
 cd ~/WorkSpace/uconsole-mapper
 ./install.sh
@@ -86,9 +86,7 @@ command = "~/.local/bin/toggle-lxterminal"
 
 [[gamepad.bindings]]
 buttons = ["BTN_THUMB"]
-hold_ms = 700
-text = "继续"
-press_enter = true
+command = "printf '%s' '提交git' | wl-copy && wtype -M ctrl -k v -m ctrl"
 
 # Push-to-talk voice input.
 # Replace BTN_THUMB2 with the actual B key code on your device if needed.
@@ -139,6 +137,7 @@ If the service does not start, check these first:
 - Whether `python3-evdev` is installed
 - Whether `python3-evdev` was removed by `apt autoremove`
 - Whether `wtype` is installed when text-input bindings are used
+- Whether `wl-copy` from `wl-clipboard` is installed when paste-style bindings are used
 - Whether `/dev/uinput` exists
 - Whether the current user has read access to `/dev/input/event*`
 - Whether `~/.local/bin/toggle-lxterminal` is executable
