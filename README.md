@@ -154,6 +154,10 @@ If the service does not start, check these first:
 - `press_command`: runs once when the combo becomes active
 - `release_command`: runs once when the combo becomes inactive
 
+When a normal `gamepad.bindings` action uses the same `buttons` as a `hold_ms`
+binding, the normal action is treated as a short press and runs on release only
+if the hold action did not fire.
+
 `press_command` / `release_command` are intended for push-to-talk style actions where press starts and release stops. They cannot be combined with `hold_ms`, `repeat_ms`, `text`, or `emit_*`.
 
 `keyboard.bindings` also supports these fields:

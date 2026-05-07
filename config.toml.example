@@ -19,6 +19,12 @@ command = "~/.local/bin/toggle-lxterminal"
 buttons = ["BTN_THUMB"]
 command = "printf '%s' '提交git' | wl-copy && wtype -M ctrl -k v -m ctrl"
 
+[[gamepad.bindings]]
+buttons = ["BTN_THUMB"]
+hold_ms = 700
+text = "继续"
+press_enter = true
+
 # Push-to-talk voice input.
 # Replace BTN_THUMB2 with the actual B key code on your device if needed.
 # When the focused input is a tmux terminal window, the voice script will

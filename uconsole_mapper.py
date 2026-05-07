@@ -341,6 +341,8 @@ class GamepadWatcher:
         self.pressed: set[int] = set()
         self.active_bindings: set[int] = set()
         self.hold_tasks: dict[int, asyncio.Task[None]] = {}
+        self.hold_fired_buttons: set[frozenset[int]] = set()
+        self.release_trigger_bindings: set[int] = set()
         self.repeat_tasks: dict[int, asyncio.Task[None]] = {}
 
     async def run(self) -> None:
@@ -368,11 +370,18 @@ class GamepadWatcher:
             return
         if not binding.buttons.issubset(self.pressed):
             return
+        self.hold_fired_buttons.add(binding.buttons)
         self._trigger_binding(binding)
 
     def _trigger_binding(self, binding: Binding) -> None:
         if binding.command or binding.text is not None:
             self.runner.run(binding, self.config.gamepad_debounce_ms)
+
+    def _has_hold_variant(self, index: int, binding: Binding) -> bool:
+        return any(
+            other_index != index and other_binding.hold_ms > 0 and other_binding.buttons == binding.buttons
+            for other_index, other_binding in enumerate(self.config.gamepad_bindings)
+        )
 
     async def _repeat_binding(self, index: int, binding: Binding) -> None:
         try:
@@ -402,6 +411,8 @@ class GamepadWatcher:
                     self.runner.run_phase(binding, "press", self.config.gamepad_debounce_ms)
                 elif binding.hold_ms > 0:
                     self.hold_tasks[index] = asyncio.create_task(self._fire_hold(index, binding))
+                elif self._has_hold_variant(index, binding):
+                    self.release_trigger_bindings.add(index)
                 else:
                     self._trigger_binding(binding)
                     if binding.repeat_ms > 0:
@@ -416,6 +427,16 @@ class GamepadWatcher:
                     task.cancel()
                 if binding.press_command is not None or binding.release_command is not None:
                     self.runner.run_phase(binding, "release", self.config.gamepad_debounce_ms)
+                elif index in self.release_trigger_bindings:
+                    self.release_trigger_bindings.remove(index)
+                    if binding.buttons not in self.hold_fired_buttons:
+                        self._trigger_binding(binding)
+                if not any(
+                    active_binding.buttons == binding.buttons
+                    for active_index, active_binding in enumerate(self.config.gamepad_bindings)
+                    if active_index in self.active_bindings
+                ):
+                    self.hold_fired_buttons.discard(binding.buttons)
 
 
 class VirtualKeyboard:
