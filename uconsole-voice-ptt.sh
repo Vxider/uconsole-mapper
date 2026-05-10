@@ -34,6 +34,10 @@ Supported variables:
   WHISPER_CONTEXT_FIELD  multipart field for tmux context, default: contextText
   WHISPER_CORRECTION_MODE
                          off | on | auto, default: auto
+  WHISPER_CORRECTION_PROFILE_ID
+                         server preset correction profile id, default: technical_development
+  WHISPER_CORRECTION_PROFILE_FIELD
+                         multipart field for correction profile id, default: correctionProfileId
   WHISPER_ENABLE_CORRECTION
                          legacy compatibility; 1 maps to correctionMode=on, 0 maps to off
   WHISPER_TEXT_JQ        jq expression, default: .data.text // .text // .result.text // empty
@@ -584,6 +588,9 @@ stop_recording() {
   elif [[ "${WHISPER_ENABLE_CORRECTION}" == "1" ]]; then
     curl_args+=(-F "enableCorrection=true")
   fi
+  if [[ -n "${WHISPER_CORRECTION_PROFILE_ID}" ]]; then
+    curl_args+=(--form-string "${WHISPER_CORRECTION_PROFILE_FIELD}=${WHISPER_CORRECTION_PROFILE_ID}")
+  fi
   prompt_text=$(build_whisper_prompt || true)
   if [[ -n "${prompt_text}" ]]; then
     curl_args+=(--form-string "${WHISPER_PROMPT_FIELD}=${prompt_text}")
@@ -696,6 +703,8 @@ WHISPER_PROMPT_FIELD=${WHISPER_PROMPT_FIELD:-prompt}
 WHISPER_PROMPT_GLOSSARY_FIELD=${WHISPER_PROMPT_GLOSSARY_FIELD:-promptGlossary}
 WHISPER_CONTEXT_FIELD=${WHISPER_CONTEXT_FIELD:-contextText}
 WHISPER_ENABLE_CORRECTION=${WHISPER_ENABLE_CORRECTION:-}
+WHISPER_CORRECTION_PROFILE_ID=${WHISPER_CORRECTION_PROFILE_ID:-technical_development}
+WHISPER_CORRECTION_PROFILE_FIELD=${WHISPER_CORRECTION_PROFILE_FIELD:-correctionProfileId}
 WHISPER_CORRECTION_MODE=${WHISPER_CORRECTION_MODE:-}
 if [[ -z "${WHISPER_CORRECTION_MODE}" ]]; then
   if [[ "${WHISPER_ENABLE_CORRECTION}" == "1" ]]; then

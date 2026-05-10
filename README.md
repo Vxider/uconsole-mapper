@@ -283,6 +283,7 @@ WHISPER_MODEL=faster-whisper-small
 WHISPER_MODEL_FIELD=modelId
 WHISPER_LANGUAGE=zh
 WHISPER_CORRECTION_MODE=auto
+WHISPER_CORRECTION_PROFILE_ID=technical_development
 VOICE_OUTPUT_MODE=fcitx_commit
 VOICE_TMUX_OUTPUT_MODE=type
 VOICE_TYPE_BACKEND=auto
@@ -311,6 +312,10 @@ Optional ASR request variables:
 # WHISPER_MODEL_FIELD=modelId
 # ASR correction mode: off | on | auto. Auto keeps normal text fast and corrects code/command mixed input.
 # WHISPER_CORRECTION_MODE=auto
+# Server preset correction profile id. Empty disables profile selection. Defaults to technical_development.
+# WHISPER_CORRECTION_PROFILE_ID=technical_development
+# Multipart field name for correction profile id. Defaults to correctionProfileId.
+# WHISPER_CORRECTION_PROFILE_FIELD=correctionProfileId
 # Legacy compatibility only; prefer WHISPER_CORRECTION_MODE.
 # WHISPER_ENABLE_CORRECTION=0
 # ASR request timeout in seconds. Defaults to 30; use 0 to disable.
