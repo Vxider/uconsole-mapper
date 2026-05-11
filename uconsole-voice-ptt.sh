@@ -43,7 +43,13 @@ Supported variables:
   WHISPER_TEXT_JQ        jq expression, default: .data.text // .text // .result.text // empty
   WHISPER_NO_PROXY       1 disables proxy for whisper requests, default: 1
   WHISPER_TIMEOUT        ASR request timeout in seconds, default: 30; 0 disables
-  VOICE_OUTPUT_MODE      type | type_enter | clipboard | paste, default: type
+  VOICE_OUTPUT_MODE      type | type_enter | clipboard | paste | fcitx_commit, default: type
+  VOICE_TMUX_OUTPUT_MODE output mode used when a tmux/terminal window is focused, default: type
+  VOICE_PASTE_SHORTCUT   ctrl_v | shift_insert, default: shift_insert
+  VOICE_FCITX_COMMIT_FILE
+                         pending text file used by fcitx_commit output
+  VOICE_FCITX_COMMIT_TRIGGER
+                         quick phrase trigger typed after writing the pending file, default: ;uv
   VOICE_RECORDER         auto | pw-record | ffmpeg | arecord, default: auto
   VOICE_INPUT            default audio input name, used by ffmpeg, default: default
   VOICE_MIN_RECORD_MS    minimum press duration before transcription, default: 350
@@ -191,7 +197,31 @@ type_text_and_enter() {
 paste_text() {
   local text=$1
   printf '%s' "${text}" | wl-copy
-  wtype -M ctrl -k v -m ctrl
+  case "${VOICE_PASTE_SHORTCUT}" in
+    ctrl_v)
+      wtype -M ctrl -k v -m ctrl
+      ;;
+    shift_insert)
+      wtype -M shift -k Insert -m shift
+      ;;
+    *)
+      echo "unsupported VOICE_PASTE_SHORTCUT: ${VOICE_PASTE_SHORTCUT}" >&2
+      return 1
+      ;;
+  esac
+}
+
+fcitx_commit_text() {
+  local text=$1
+
+  mkdir -p "$(dirname -- "${VOICE_FCITX_COMMIT_FILE}")"
+  printf '%s' "${text}" >"${VOICE_FCITX_COMMIT_FILE}"
+
+  command -v wtype >/dev/null 2>&1 || {
+    echo "wtype is required for voice output mode fcitx_commit" >&2
+    return 1
+  }
+  wtype "${VOICE_FCITX_COMMIT_TRIGGER}"
 }
 
 run_whisper_curl() {
@@ -267,7 +297,7 @@ choose_recorder() {
   return 1
 }
 
-terminal_window_is_active() {
+terminal_window_is_focused() {
   local spec
   local specs=(
     "title:QuickTerm"
@@ -284,6 +314,14 @@ terminal_window_is_active() {
     fi
   done
 
+  return 1
+}
+
+terminal_window_is_active() {
+  terminal_window_is_focused && return 0
+
+  local spec
+  [[ -x "${WLRCTL}" ]] || return 1
   for spec in "title:QuickTerm" "app_id:QuickTerm" "app_id:quickterm"; do
     if "${WLRCTL}" window find "${spec}" >/dev/null 2>&1; then
       return 0
@@ -464,41 +502,52 @@ EOF
 
 inject_text() {
   local text=$1
-  case "${VOICE_OUTPUT_MODE}" in
+  local tmux_context=${2:-}
+  local output_mode=${VOICE_OUTPUT_MODE}
+  if [[ -n "${tmux_context}" ]]; then
+    output_mode=${VOICE_TMUX_OUTPUT_MODE}
+  elif [[ "${output_mode}" == "type" ]]; then
+    output_mode=fcitx_commit
+  fi
+
+  case "${output_mode}" in
     type)
       command -v wtype >/dev/null 2>&1 || {
-        echo "wtype is required for VOICE_OUTPUT_MODE=type" >&2
+        echo "wtype is required for voice output mode type" >&2
         return 1
       }
       with_ime_suspended type_text "${text}"
       ;;
     type_enter)
       command -v wtype >/dev/null 2>&1 || {
-        echo "wtype is required for VOICE_OUTPUT_MODE=type_enter" >&2
+        echo "wtype is required for voice output mode type_enter" >&2
         return 1
       }
       with_ime_suspended type_text_and_enter "${text}"
       ;;
     clipboard)
       command -v wl-copy >/dev/null 2>&1 || {
-        echo "wl-copy is required for VOICE_OUTPUT_MODE=clipboard" >&2
+        echo "wl-copy is required for voice output mode clipboard" >&2
         return 1
       }
       printf '%s' "${text}" | wl-copy
       ;;
     paste)
       command -v wl-copy >/dev/null 2>&1 || {
-        echo "wl-copy is required for VOICE_OUTPUT_MODE=paste" >&2
+        echo "wl-copy is required for voice output mode paste" >&2
         return 1
       }
       command -v wtype >/dev/null 2>&1 || {
-        echo "wtype is required for VOICE_OUTPUT_MODE=paste" >&2
+        echo "wtype is required for voice output mode paste" >&2
         return 1
       }
       with_ime_suspended paste_text "${text}"
       ;;
+    fcitx_commit)
+      fcitx_commit_text "${text}"
+      ;;
     *)
-      echo "unsupported VOICE_OUTPUT_MODE: ${VOICE_OUTPUT_MODE}" >&2
+      echo "unsupported voice output mode: ${output_mode}" >&2
       return 1
       ;;
   esac
@@ -567,6 +616,7 @@ stop_recording() {
   local prompt_text=
   local prompt_glossary_json=
   local context_text=
+  local correction_mode=
   local -a curl_args=(
     -fsS
     --max-time "${WHISPER_TIMEOUT}"
@@ -583,14 +633,6 @@ stop_recording() {
   if [[ -n "${WHISPER_LANGUAGE}" ]]; then
     curl_args+=(-F "language=${WHISPER_LANGUAGE}")
   fi
-  if [[ -n "${WHISPER_CORRECTION_MODE}" ]]; then
-    curl_args+=(-F "correctionMode=${WHISPER_CORRECTION_MODE}")
-  elif [[ "${WHISPER_ENABLE_CORRECTION}" == "1" ]]; then
-    curl_args+=(-F "enableCorrection=true")
-  fi
-  if [[ -n "${WHISPER_CORRECTION_PROFILE_ID}" ]]; then
-    curl_args+=(--form-string "${WHISPER_CORRECTION_PROFILE_FIELD}=${WHISPER_CORRECTION_PROFILE_ID}")
-  fi
   prompt_text=$(build_whisper_prompt || true)
   if [[ -n "${prompt_text}" ]]; then
     curl_args+=(--form-string "${WHISPER_PROMPT_FIELD}=${prompt_text}")
@@ -602,6 +644,18 @@ stop_recording() {
   context_text=$(build_whisper_context || true)
   if [[ -n "${context_text}" ]]; then
     curl_args+=(--form-string "${WHISPER_CONTEXT_FIELD}=${context_text}")
+  fi
+  correction_mode=${WHISPER_CORRECTION_MODE}
+  if [[ "${correction_mode}" == "auto" && -z "${context_text}" ]]; then
+    correction_mode=off
+  fi
+  if [[ -n "${correction_mode}" ]]; then
+    curl_args+=(-F "correctionMode=${correction_mode}")
+  elif [[ "${WHISPER_ENABLE_CORRECTION}" == "1" ]]; then
+    curl_args+=(-F "enableCorrection=true")
+  fi
+  if [[ -n "${WHISPER_CORRECTION_PROFILE_ID}" && "${correction_mode}" != "off" ]]; then
+    curl_args+=(--form-string "${WHISPER_CORRECTION_PROFILE_FIELD}=${WHISPER_CORRECTION_PROFILE_ID}")
   fi
 
   show_status "uconsole voice" "识别中..." "65" "0"
@@ -628,7 +682,7 @@ stop_recording() {
     exit 1
   fi
 
-  if ! inject_text "${text}"; then
+  if ! inject_text "${text}" "${context_text}"; then
     show_status "uconsole voice" "文本注入失败" "0" "1200"
     [[ "${VOICE_KEEP_AUDIO}" == "1" ]] || rm -f "${AUDIO_FILE}"
     exit 1
@@ -683,6 +737,10 @@ VOICE_MIN_RECORD_MS=${VOICE_MIN_RECORD_MS:-350}
 VOICE_SAMPLE_RATE=${VOICE_SAMPLE_RATE:-16000}
 VOICE_CHANNELS=${VOICE_CHANNELS:-1}
 VOICE_OUTPUT_MODE=${VOICE_OUTPUT_MODE:-type}
+VOICE_TMUX_OUTPUT_MODE=${VOICE_TMUX_OUTPUT_MODE:-type}
+VOICE_PASTE_SHORTCUT=${VOICE_PASTE_SHORTCUT:-shift_insert}
+VOICE_FCITX_COMMIT_FILE=${VOICE_FCITX_COMMIT_FILE:-"${VOICE_STATE_DIR}/fcitx-voice-commit.txt"}
+VOICE_FCITX_COMMIT_TRIGGER=${VOICE_FCITX_COMMIT_TRIGGER:-";uv"}
 VOICE_KEEP_AUDIO=${VOICE_KEEP_AUDIO:-0}
 VOICE_NOTIFY_ID=${VOICE_NOTIFY_ID:-991199}
 VOICE_NOTIFY_USE_MARKUP=${VOICE_NOTIFY_USE_MARKUP:-0}

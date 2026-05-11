@@ -6,9 +6,10 @@ APP_DIR="${HOME}/.local/share/uconsole-mapper"
 BIN_DIR="${HOME}/.local/bin"
 CONFIG_DIR="${HOME}/.config/uconsole-mapper"
 SYSTEMD_DIR="${HOME}/.config/systemd/user"
+FCITX_LUA_DIR="${HOME}/.local/share/fcitx5/lua/imeapi/extensions"
 PYTHON_BIN=${PYTHON_BIN:-/usr/bin/python3}
 
-mkdir -p "${APP_DIR}" "${BIN_DIR}" "${CONFIG_DIR}" "${SYSTEMD_DIR}"
+mkdir -p "${APP_DIR}" "${BIN_DIR}" "${CONFIG_DIR}" "${SYSTEMD_DIR}" "${FCITX_LUA_DIR}"
 
 if [[ ! -x "${PYTHON_BIN}" ]]; then
   echo "Python interpreter not found: ${PYTHON_BIN}"
@@ -61,6 +62,7 @@ install -m 0755 "${SCRIPT_DIR}/show-desktop.sh" "${BIN_DIR}/uconsole-show-deskto
 install -m 0755 "${SCRIPT_DIR}/esc-switch-ime-english.sh" "${BIN_DIR}/esc-switch-ime-english"
 install -m 0755 "${SCRIPT_DIR}/shift-enter-newline.sh" "${BIN_DIR}/shift-enter-newline"
 install -m 0755 "${SCRIPT_DIR}/uconsole-voice-ptt.sh" "${BIN_DIR}/uconsole-voice-ptt"
+install -m 0644 "${SCRIPT_DIR}/fcitx-uconsole-voice-commit.lua" "${FCITX_LUA_DIR}/uconsole_voice_commit.lua"
 install -m 0755 "${SCRIPT_DIR}/generate_desktop_keybinds.py" "${APP_DIR}/generate_desktop_keybinds.py"
 install -m 0755 "${SCRIPT_DIR}/sync_labwc_keybinds.py" "${APP_DIR}/sync_labwc_keybinds.py"
 install -m 0755 "${SCRIPT_DIR}/sync_keyd_default_conf.py" "${APP_DIR}/sync_keyd_default_conf.py"

@@ -14,4 +14,12 @@ if [[ -x "${WLRCTL}" ]]; then
   fi
 fi
 
-exec "${CHROMIUM_BIN}" >/dev/null 2>&1 &
+export GTK_IM_MODULE="${GTK_IM_MODULE:-fcitx}"
+export QT_IM_MODULE="${QT_IM_MODULE:-fcitx}"
+export XMODIFIERS="${XMODIFIERS:-@im=fcitx}"
+export INPUT_METHOD="${INPUT_METHOD:-fcitx}"
+
+exec "${CHROMIUM_BIN}" \
+  --ozone-platform=wayland \
+  --enable-wayland-ime \
+  >/dev/null 2>&1 &
