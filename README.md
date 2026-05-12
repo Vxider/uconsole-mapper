@@ -284,12 +284,14 @@ WHISPER_MODEL_FIELD=modelId
 WHISPER_LANGUAGE=zh
 WHISPER_CORRECTION_MODE=auto
 WHISPER_CORRECTION_PROFILE_ID=technical_development
-VOICE_OUTPUT_MODE=fcitx_commit
+VOICE_OUTPUT_MODE=paste
 VOICE_TMUX_OUTPUT_MODE=type
+VOICE_WECHAT_OUTPUT_MODE=paste
 VOICE_TYPE_BACKEND=auto
 VOICE_TMUX_TYPE_BACKEND=wtype
-VOICE_PASTE_SHORTCUT=shift_insert
-VOICE_PASTE_BACKEND=auto
+VOICE_PASTE_BACKEND=uinput
+VOICE_PASTE_SHORTCUT=ctrl_v
+VOICE_WECHAT_PASTE_SHORTCUT=ctrl_v
 VOICE_NOTIFY_USE_MARKUP=0
 VOICE_NOTIFY_FONT_SIZE=22
 VOICE_NOTIFY_PADDING_LINES=1
@@ -344,12 +346,14 @@ Supported output modes:
 
 Window-specific behavior:
 
-- non-tmux windows use `VOICE_OUTPUT_MODE`; `fcitx_commit` is the most input-method-like path when `wtype` / `ydotool` are not accepted by the target app
-- tmux / QuickTerm use `VOICE_TMUX_OUTPUT_MODE`; the default is `type`, so shell apps still receive direct text input and tmux context correction keeps working
+- non-tmux windows use `VOICE_OUTPUT_MODE`; `paste` is the default because more desktop apps accept clipboard paste than synthetic typing or fcitx quick-phrase commits
+- tmux / QuickTerm use `VOICE_TMUX_OUTPUT_MODE` whenever the terminal window is focused; the default is `type`, so shell apps still receive direct text input even if tmux context capture is unavailable
+- WeChat windows use `VOICE_WECHAT_OUTPUT_MODE`; the default is `paste` because WeChat may not accept the fcitx quick-phrase commit path reliably
 - `VOICE_TYPE_BACKEND=auto` prefers `ydotool` when its socket is available, otherwise falls back to `wtype`
 - `VOICE_TMUX_TYPE_BACKEND` defaults to `wtype`, so tmux keeps the previous direct-text path unless you explicitly change it
-- `VOICE_PASTE_SHORTCUT` defaults to `shift_insert`, which is more reliable than synthetic `Ctrl+V` in some Wayland browser setups
-- `VOICE_PASTE_BACKEND=auto` prefers `ydotool` when its socket is available, otherwise falls back to `wtype`
+- `VOICE_PASTE_SHORTCUT` defaults to `ctrl_v`, which is accepted by WeChat and most desktop apps
+- `VOICE_WECHAT_PASTE_SHORTCUT` defaults to `ctrl_v`, so WeChat can stay on `Ctrl+V` even if the global paste shortcut is changed
+- `VOICE_PASTE_BACKEND=auto` prefers the `uconsole-paste` uinput helper when it is installed, otherwise falls back to `wtype`; use `uinput` to require the helper
 - this also avoids the Chromium-side issue where direct virtual-keyboard typing can land as key positions such as `1234567890`
 
 Notification behavior:

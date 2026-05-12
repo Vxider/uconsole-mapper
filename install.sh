@@ -61,6 +61,7 @@ install -m 0755 "${SCRIPT_DIR}/run-or-raise-zdesktop.sh" "${BIN_DIR}/run-or-rais
 install -m 0755 "${SCRIPT_DIR}/show-desktop.sh" "${BIN_DIR}/uconsole-show-desktop"
 install -m 0755 "${SCRIPT_DIR}/esc-switch-ime-english.sh" "${BIN_DIR}/esc-switch-ime-english"
 install -m 0755 "${SCRIPT_DIR}/shift-enter-newline.sh" "${BIN_DIR}/shift-enter-newline"
+install -m 0755 "${SCRIPT_DIR}/uconsole-paste.sh" "${BIN_DIR}/uconsole-paste"
 install -m 0755 "${SCRIPT_DIR}/uconsole-voice-ptt.sh" "${BIN_DIR}/uconsole-voice-ptt"
 install -m 0644 "${SCRIPT_DIR}/fcitx-uconsole-voice-commit.lua" "${FCITX_LUA_DIR}/uconsole_voice_commit.lua"
 install -m 0755 "${SCRIPT_DIR}/generate_desktop_keybinds.py" "${APP_DIR}/generate_desktop_keybinds.py"

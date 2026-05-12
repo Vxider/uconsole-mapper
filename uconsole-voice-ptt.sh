@@ -45,7 +45,13 @@ Supported variables:
   WHISPER_TIMEOUT        ASR request timeout in seconds, default: 30; 0 disables
   VOICE_OUTPUT_MODE      type | type_enter | clipboard | paste | fcitx_commit, default: type
   VOICE_TMUX_OUTPUT_MODE output mode used when a tmux/terminal window is focused, default: type
+  VOICE_WECHAT_OUTPUT_MODE
+                         output mode used when WeChat is focused, default: paste
   VOICE_PASTE_SHORTCUT   ctrl_v | shift_insert, default: shift_insert
+  VOICE_WECHAT_PASTE_SHORTCUT
+                         ctrl_v | shift_insert, default: ctrl_v
+  VOICE_PASTE_BACKEND    auto | uinput | wtype, default: auto
+  VOICE_PASTE_DELAY      delay before wtype paste shortcut, default: 0.08
   VOICE_FCITX_COMMIT_FILE
                          pending text file used by fcitx_commit output
   VOICE_FCITX_COMMIT_TRIGGER
@@ -196,8 +202,34 @@ type_text_and_enter() {
 
 paste_text() {
   local text=$1
+  local shortcut=${2:-${VOICE_PASTE_SHORTCUT}}
+
+  case "${VOICE_PASTE_BACKEND}" in
+    auto)
+      if command -v uconsole-paste >/dev/null 2>&1; then
+        printf '%s' "${text}" | uconsole-paste "${shortcut}"
+        return
+      fi
+      ;;
+    uinput)
+      command -v uconsole-paste >/dev/null 2>&1 || {
+        echo "uconsole-paste is required for voice paste backend uinput" >&2
+        return 1
+      }
+      printf '%s' "${text}" | uconsole-paste "${shortcut}"
+      return
+      ;;
+    wtype)
+      ;;
+    *)
+      echo "unsupported VOICE_PASTE_BACKEND: ${VOICE_PASTE_BACKEND}" >&2
+      return 1
+      ;;
+  esac
+
   printf '%s' "${text}" | wl-copy
-  case "${VOICE_PASTE_SHORTCUT}" in
+  sleep "${VOICE_PASTE_DELAY}"
+  case "${shortcut}" in
     ctrl_v)
       wtype -M ctrl -k v -m ctrl
       ;;
@@ -205,7 +237,7 @@ paste_text() {
       wtype -M shift -k Insert -m shift
       ;;
     *)
-      echo "unsupported VOICE_PASTE_SHORTCUT: ${VOICE_PASTE_SHORTCUT}" >&2
+      echo "unsupported paste shortcut: ${shortcut}" >&2
       return 1
       ;;
   esac
@@ -318,12 +350,24 @@ terminal_window_is_focused() {
 }
 
 terminal_window_is_active() {
-  terminal_window_is_focused && return 0
+  terminal_window_is_focused
+}
 
+wechat_window_is_focused() {
   local spec
+  local specs=(
+    "app_id:wechat"
+    "app_id:WeChat"
+    "app_id:wechat-uos"
+    "app_id:com.tencent.WeChat"
+    "title:微信"
+    "title:WeChat"
+  )
+
   [[ -x "${WLRCTL}" ]] || return 1
-  for spec in "title:QuickTerm" "app_id:QuickTerm" "app_id:quickterm"; do
-    if "${WLRCTL}" window find "${spec}" >/dev/null 2>&1; then
+
+  for spec in "${specs[@]}"; do
+    if "${WLRCTL}" window find "${spec}" "state:active" >/dev/null 2>&1; then
       return 0
     fi
   done
@@ -504,8 +548,12 @@ inject_text() {
   local text=$1
   local tmux_context=${2:-}
   local output_mode=${VOICE_OUTPUT_MODE}
-  if [[ -n "${tmux_context}" ]]; then
+  local paste_shortcut=${VOICE_PASTE_SHORTCUT}
+  if [[ -n "${tmux_context}" ]] || terminal_window_is_focused; then
     output_mode=${VOICE_TMUX_OUTPUT_MODE}
+  elif wechat_window_is_focused; then
+    output_mode=${VOICE_WECHAT_OUTPUT_MODE}
+    paste_shortcut=${VOICE_WECHAT_PASTE_SHORTCUT}
   elif [[ "${output_mode}" == "type" ]]; then
     output_mode=fcitx_commit
   fi
@@ -541,7 +589,7 @@ inject_text() {
         echo "wtype is required for voice output mode paste" >&2
         return 1
       }
-      with_ime_suspended paste_text "${text}"
+      with_ime_suspended paste_text "${text}" "${paste_shortcut}"
       ;;
     fcitx_commit)
       fcitx_commit_text "${text}"
@@ -738,7 +786,11 @@ VOICE_SAMPLE_RATE=${VOICE_SAMPLE_RATE:-16000}
 VOICE_CHANNELS=${VOICE_CHANNELS:-1}
 VOICE_OUTPUT_MODE=${VOICE_OUTPUT_MODE:-type}
 VOICE_TMUX_OUTPUT_MODE=${VOICE_TMUX_OUTPUT_MODE:-type}
+VOICE_WECHAT_OUTPUT_MODE=${VOICE_WECHAT_OUTPUT_MODE:-paste}
 VOICE_PASTE_SHORTCUT=${VOICE_PASTE_SHORTCUT:-shift_insert}
+VOICE_WECHAT_PASTE_SHORTCUT=${VOICE_WECHAT_PASTE_SHORTCUT:-ctrl_v}
+VOICE_PASTE_BACKEND=${VOICE_PASTE_BACKEND:-auto}
+VOICE_PASTE_DELAY=${VOICE_PASTE_DELAY:-0.08}
 VOICE_FCITX_COMMIT_FILE=${VOICE_FCITX_COMMIT_FILE:-"${VOICE_STATE_DIR}/fcitx-voice-commit.txt"}
 VOICE_FCITX_COMMIT_TRIGGER=${VOICE_FCITX_COMMIT_TRIGGER:-";uv"}
 VOICE_KEEP_AUDIO=${VOICE_KEEP_AUDIO:-0}
