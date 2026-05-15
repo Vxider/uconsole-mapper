@@ -21,8 +21,7 @@ Configuration is read from:
 
 Supported variables:
   WHISPER_URL            required, whisper endpoint
-  WHISPER_MODEL          optional transcription model id
-  WHISPER_MODEL_FIELD    multipart field for model id, default: model
+  WHISPER_MODEL          optional transcription model id, sent as modelId
   WHISPER_LANGUAGE       optional multipart field
   WHISPER_AUTH_TOKEN     optional bearer token
   WHISPER_PROMPT         optional short ASR prompt hint
@@ -36,13 +35,11 @@ Supported variables:
                          off | on | auto, default: auto
   WHISPER_CORRECTION_PROFILE_ID
                          server preset correction profile id, default: technical_development
-  WHISPER_CORRECTION_PROFILE_FIELD
-                         multipart field for correction profile id, default: correctionProfileId
   WHISPER_ENABLE_CORRECTION
-                         legacy compatibility; 1 maps to correctionMode=on, 0 maps to off
+                         legacy compatibility only; 1 maps to correctionMode=on, 0 maps to off
   WHISPER_TEXT_JQ        jq expression, default: .data.text // .text // .result.text // empty
   WHISPER_NO_PROXY       1 disables proxy for whisper requests, default: 1
-  WHISPER_TIMEOUT        ASR request timeout in seconds, default: 30; 0 disables
+  WHISPER_TIMEOUT        ASR request timeout in seconds, default: 60; 0 disables
   VOICE_OUTPUT_MODE      type | type_enter | clipboard | paste | fcitx_commit, default: type
   VOICE_TMUX_OUTPUT_MODE output mode used when a tmux/terminal window is focused, default: type
   VOICE_WECHAT_OUTPUT_MODE
@@ -59,6 +56,7 @@ Supported variables:
   VOICE_RECORDER         auto | pw-record | ffmpeg | arecord, default: auto
   VOICE_INPUT            default audio input name, used by ffmpeg, default: default
   VOICE_MIN_RECORD_MS    minimum press duration before transcription, default: 350
+  VOICE_MAX_RECORD_MS    maximum recording duration before automatic rollover, default: 60000; 0 disables
   VOICE_SAMPLE_RATE      default: 16000
   VOICE_CHANNELS         default: 1
   VOICE_STATE_DIR        default: ${XDG_STATE_HOME:-~/.local/state}/uconsole-mapper
@@ -541,6 +539,28 @@ AUDIO_FILE=$(printf '%q' "${audio_file}")
 RECORDER_NAME=${recorder}
 STARTED_AT_MS=$(date +%s%3N)
 EOF
+
+  if (( VOICE_MAX_RECORD_MS > 0 )); then
+    local watchdog_sleep_s=$(((VOICE_MAX_RECORD_MS + 999) / 1000))
+    local script_path=${BASH_SOURCE[0]}
+    if [[ "${script_path}" != */* ]]; then
+      script_path=$(command -v -- "${script_path}" || printf '%s' "${script_path}")
+    fi
+    script_path=$(readlink -f -- "${script_path}" 2>/dev/null || printf '%s' "${script_path}")
+    (
+      sleep "${watchdog_sleep_s}"
+      if [[ -f "${STATE_FILE}" ]]; then
+        # shellcheck disable=SC1090
+        source "${STATE_FILE}"
+        if [[ "${RECORDER_PID:-}" == "${recorder_pid}" ]]; then
+          VOICE_ROLLOVER_AFTER_STOP=1 VOICE_SUPPRESS_ASR_STATUS=1 "${script_path}" stop
+        fi
+      fi
+    ) >/dev/null 2>&1 &
+    local watchdog_pid=$!
+    printf 'WATCHDOG_PID=%s\n' "${watchdog_pid}" >>"${STATE_FILE}"
+  fi
+
   show_recording_status
 }
 
@@ -606,9 +626,16 @@ stop_recording() {
     exit 0
   fi
 
+  local rollover_after_stop=${VOICE_ROLLOVER_AFTER_STOP:-0}
+  local suppress_asr_status=${VOICE_SUPPRESS_ASR_STATUS:-0}
+
   # shellcheck disable=SC1090
   source "${STATE_FILE}"
   rm -f "${STATE_FILE}"
+
+  if [[ -n "${WATCHDOG_PID:-}" && "${WATCHDOG_PID}" != "$$" ]]; then
+    kill "${WATCHDOG_PID}" >/dev/null 2>&1 || true
+  fi
 
   if [[ -z "${RECORDER_PID:-}" || -z "${AUDIO_FILE:-}" ]]; then
     echo "state file is incomplete" >&2
@@ -630,22 +657,32 @@ stop_recording() {
     fi
   fi
 
+  if [[ "${rollover_after_stop}" == "1" ]]; then
+    start_recording
+  fi
+
   if (( duration_ms < VOICE_MIN_RECORD_MS )); then
-    show_status "uconsole voice" "录音太短，已取消" "0" "800"
+    if [[ "${suppress_asr_status}" != "1" ]]; then
+      show_status "uconsole voice" "录音太短，已取消" "0" "800"
+    fi
     [[ "${VOICE_KEEP_AUDIO}" == "1" ]] || rm -f "${AUDIO_FILE}"
     exit 0
   fi
 
   if [[ ! -s "${AUDIO_FILE}" ]]; then
     echo "recorded audio is empty" >&2
-    show_status "uconsole voice" "录音失败" "0" "1000"
+    if [[ "${suppress_asr_status}" != "1" ]]; then
+      show_status "uconsole voice" "录音失败" "0" "1000"
+    fi
     [[ "${VOICE_KEEP_AUDIO}" == "1" ]] || rm -f "${AUDIO_FILE}"
     exit 1
   fi
 
   if [[ -z "${WHISPER_URL}" ]]; then
     echo "WHISPER_URL is required" >&2
-    show_status "uconsole voice" "未配置 WHISPER_URL" "0" "1200"
+    if [[ "${suppress_asr_status}" != "1" ]]; then
+      show_status "uconsole voice" "未配置 WHISPER_URL" "0" "1200"
+    fi
     exit 1
   fi
 
@@ -676,7 +713,7 @@ stop_recording() {
     curl_args+=(-H "Authorization: Bearer ${WHISPER_AUTH_TOKEN}")
   fi
   if [[ -n "${WHISPER_MODEL}" ]]; then
-    curl_args+=(-F "${WHISPER_MODEL_FIELD}=${WHISPER_MODEL}")
+    curl_args+=(-F "modelId=${WHISPER_MODEL}")
   fi
   if [[ -n "${WHISPER_LANGUAGE}" ]]; then
     curl_args+=(-F "language=${WHISPER_LANGUAGE}")
@@ -694,26 +731,27 @@ stop_recording() {
     curl_args+=(--form-string "${WHISPER_CONTEXT_FIELD}=${context_text}")
   fi
   correction_mode=${WHISPER_CORRECTION_MODE}
-  if [[ "${correction_mode}" == "auto" && -z "${context_text}" ]]; then
-    correction_mode=off
-  fi
   if [[ -n "${correction_mode}" ]]; then
     curl_args+=(-F "correctionMode=${correction_mode}")
   elif [[ "${WHISPER_ENABLE_CORRECTION}" == "1" ]]; then
     curl_args+=(-F "enableCorrection=true")
   fi
   if [[ -n "${WHISPER_CORRECTION_PROFILE_ID}" && "${correction_mode}" != "off" ]]; then
-    curl_args+=(--form-string "${WHISPER_CORRECTION_PROFILE_FIELD}=${WHISPER_CORRECTION_PROFILE_ID}")
+    curl_args+=(--form-string "correctionProfileId=${WHISPER_CORRECTION_PROFILE_ID}")
   fi
 
-  show_status "uconsole voice" "识别中..." "65" "0"
+  if [[ "${suppress_asr_status}" != "1" ]]; then
+    show_status "uconsole voice" "识别中..." "65" "0"
+  fi
   local curl_status=0
   run_whisper_curl "${curl_args[@]}" >"${response_file}" || curl_status=$?
   if (( curl_status != 0 )); then
-    if (( curl_status == 28 )); then
-      show_status "uconsole voice" "识别超时" "0" "1200"
-    else
-      show_status "uconsole voice" "Whisper 请求失败" "0" "1200"
+    if [[ "${suppress_asr_status}" != "1" ]]; then
+      if (( curl_status == 28 )); then
+        show_status "uconsole voice" "识别超时" "0" "1200"
+      else
+        show_status "uconsole voice" "Whisper 请求失败" "0" "1200"
+      fi
     fi
     rm -f "${response_file}"
     [[ "${VOICE_KEEP_AUDIO}" == "1" ]] || rm -f "${AUDIO_FILE}"
@@ -725,18 +763,24 @@ stop_recording() {
   rm -f "${response_file}"
 
   if [[ -z "${text}" ]]; then
-    show_status "uconsole voice" "未识别到文本" "0" "1000"
+    if [[ "${suppress_asr_status}" != "1" ]]; then
+      show_status "uconsole voice" "未识别到文本" "0" "1000"
+    fi
     [[ "${VOICE_KEEP_AUDIO}" == "1" ]] || rm -f "${AUDIO_FILE}"
     exit 1
   fi
 
   if ! inject_text "${text}" "${context_text}"; then
-    show_status "uconsole voice" "文本注入失败" "0" "1200"
+    if [[ "${suppress_asr_status}" != "1" ]]; then
+      show_status "uconsole voice" "文本注入失败" "0" "1200"
+    fi
     [[ "${VOICE_KEEP_AUDIO}" == "1" ]] || rm -f "${AUDIO_FILE}"
     exit 1
   fi
 
-  close_status
+  if [[ "${suppress_asr_status}" != "1" ]]; then
+    close_status
+  fi
   [[ "${VOICE_KEEP_AUDIO}" == "1" ]] || rm -f "${AUDIO_FILE}"
 }
 
@@ -782,6 +826,7 @@ STATE_FILE="${VOICE_STATE_DIR}/voice-ptt.state"
 VOICE_RECORDER=${VOICE_RECORDER:-auto}
 VOICE_INPUT=${VOICE_INPUT:-default}
 VOICE_MIN_RECORD_MS=${VOICE_MIN_RECORD_MS:-350}
+VOICE_MAX_RECORD_MS=${VOICE_MAX_RECORD_MS:-60000}
 VOICE_SAMPLE_RATE=${VOICE_SAMPLE_RATE:-16000}
 VOICE_CHANNELS=${VOICE_CHANNELS:-1}
 VOICE_OUTPUT_MODE=${VOICE_OUTPUT_MODE:-type}
@@ -805,7 +850,6 @@ VOICE_TMUX_CONTEXT_MAX_CHARS=${VOICE_TMUX_CONTEXT_MAX_CHARS:-1200}
 WLRCTL=${WLRCTL:-"${HOME}/.local/bin/wlrctl"}
 WHISPER_URL=${WHISPER_URL:-}
 WHISPER_MODEL=${WHISPER_MODEL:-}
-WHISPER_MODEL_FIELD=${WHISPER_MODEL_FIELD:-model}
 WHISPER_LANGUAGE=${WHISPER_LANGUAGE:-}
 WHISPER_AUTH_TOKEN=${WHISPER_AUTH_TOKEN:-}
 WHISPER_PROMPT=${WHISPER_PROMPT:-}
@@ -814,7 +858,6 @@ WHISPER_PROMPT_GLOSSARY_FIELD=${WHISPER_PROMPT_GLOSSARY_FIELD:-promptGlossary}
 WHISPER_CONTEXT_FIELD=${WHISPER_CONTEXT_FIELD:-contextText}
 WHISPER_ENABLE_CORRECTION=${WHISPER_ENABLE_CORRECTION:-}
 WHISPER_CORRECTION_PROFILE_ID=${WHISPER_CORRECTION_PROFILE_ID:-technical_development}
-WHISPER_CORRECTION_PROFILE_FIELD=${WHISPER_CORRECTION_PROFILE_FIELD:-correctionProfileId}
 WHISPER_CORRECTION_MODE=${WHISPER_CORRECTION_MODE:-}
 if [[ -z "${WHISPER_CORRECTION_MODE}" ]]; then
   if [[ "${WHISPER_ENABLE_CORRECTION}" == "1" ]]; then
@@ -827,7 +870,7 @@ if [[ -z "${WHISPER_CORRECTION_MODE}" ]]; then
 fi
 WHISPER_TEXT_JQ=${WHISPER_TEXT_JQ:-'.data.text // .text // .result.text // empty'}
 WHISPER_NO_PROXY=${WHISPER_NO_PROXY:-1}
-WHISPER_TIMEOUT=${WHISPER_TIMEOUT:-30}
+WHISPER_TIMEOUT=${WHISPER_TIMEOUT:-60}
 
 case "${ACTION}" in
   start)

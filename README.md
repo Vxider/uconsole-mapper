@@ -1,6 +1,6 @@
 # uconsole-mapper
 
-`uconsole-mapper` is an input daemon for uConsole. It maps gamepad and mouse events to commands, text input, or virtual input events, and it can still handle keyboard interception in a legacy compatibility mode.
+`uconsole-mapper` is an input daemon for uConsole. The voice PTT path now targets FlashAI current POST /api/asr/transcriptions contract directly and no longer downshifts correctionMode=auto to off on the client side. It maps gamepad and mouse events to commands, text input, or virtual input events, and it can still handle keyboard interception in a legacy compatibility mode.
 
 ## Default Features
 
@@ -280,7 +280,6 @@ Example `voice.env`:
 ```bash
 WHISPER_URL=http://127.0.0.1:3300/api/asr/transcriptions
 WHISPER_MODEL=faster-whisper-small
-WHISPER_MODEL_FIELD=modelId
 WHISPER_LANGUAGE=zh
 WHISPER_CORRECTION_MODE=auto
 WHISPER_CORRECTION_PROFILE_ID=technical_development
@@ -295,6 +294,7 @@ VOICE_WECHAT_PASTE_SHORTCUT=ctrl_v
 VOICE_NOTIFY_USE_MARKUP=0
 VOICE_NOTIFY_FONT_SIZE=22
 VOICE_NOTIFY_PADDING_LINES=1
+VOICE_MAX_RECORD_MS=60000
 ```
 
 Optional ASR request variables:
@@ -310,18 +310,16 @@ Optional ASR request variables:
 # VOICE_GLOSSARY_FILE=~/.config/uconsole-mapper/voice-glossary.txt
 # Multipart field name for tmux context sent to correction. Defaults to contextText.
 # WHISPER_CONTEXT_FIELD=contextText
-# Multipart field name for the transcription model id. Use modelId for FlashAI asr_server.
-# WHISPER_MODEL_FIELD=modelId
 # ASR correction mode: off | on | auto. Auto keeps normal text fast and corrects code/command mixed input.
 # WHISPER_CORRECTION_MODE=auto
 # Server preset correction profile id. Empty disables profile selection. Defaults to technical_development.
 # WHISPER_CORRECTION_PROFILE_ID=technical_development
-# Multipart field name for correction profile id. Defaults to correctionProfileId.
-# WHISPER_CORRECTION_PROFILE_FIELD=correctionProfileId
 # Legacy compatibility only; prefer WHISPER_CORRECTION_MODE.
 # WHISPER_ENABLE_CORRECTION=0
-# ASR request timeout in seconds. Defaults to 30; use 0 to disable.
-# WHISPER_TIMEOUT=30
+# ASR request timeout in seconds. Defaults to 60; use 0 to disable.
+# WHISPER_TIMEOUT=60
+# Maximum recording duration before silently starting a new recording segment. Defaults to 60000 ms; use 0 to disable.
+# VOICE_MAX_RECORD_MS=60000
 # Include the current tmux active pane visible text when a tmux terminal is focused.
 VOICE_TMUX_CONTEXT=1
 # If the visible area is too short, fall back to at least this many recent lines.
