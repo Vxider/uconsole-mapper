@@ -1,6 +1,6 @@
 # uconsole-mapper
 
-`uconsole-mapper` is an input daemon for uConsole. The voice PTT path now targets FlashAI current POST /api/asr/transcriptions contract directly and no longer downshifts correctionMode=auto to off on the client side. It maps gamepad and mouse events to commands, text input, or virtual input events, and it can still handle keyboard interception in a legacy compatibility mode.
+`uconsole-mapper` is an input daemon for uConsole. The voice PTT path targets FlashAI's current ASR API with a personal ASR Token, calls `POST /api/asr/transcriptions`, and supports a conservative tmux/Codex TUI learning shortcut through `POST /api/asr/transcription-events/:requestId/finalize`. It maps gamepad and mouse events to commands, text input, or virtual input events, and it can still handle keyboard interception in a legacy compatibility mode.
 
 ## Default Features
 
@@ -152,13 +152,18 @@ If the service does not start, check these first:
 - `text`: types a string through `wtype`
 - `press_enter`: sends Enter after `text`; default `false`
 - `press_command`: runs once when the combo becomes active
-- `release_command`: runs once when the combo becomes inactive
+- `release_command`: runs once when the combo becomes inactive; with `hold_ms`, it only runs after the hold threshold is reached
 
 When a normal `gamepad.bindings` action uses the same `buttons` as a `hold_ms`
 binding, the normal action is treated as a short press and runs on release only
 if the hold action did not fire.
 
-`press_command` / `release_command` are intended for push-to-talk style actions where press starts and release stops. They cannot be combined with `hold_ms`, `repeat_ms`, `text`, or `emit_*`.
+`press_command` / `release_command` are intended for push-to-talk style actions
+where press starts immediately and release stops. With `hold_ms`, press still
+runs immediately, but release only runs after the hold threshold is reached.
+This keeps long-press recording responsive while allowing the same button to use
+a normal `command` as a short-press action. Phase bindings cannot be combined
+with `repeat_ms`, `text`, or `emit_*`.
 
 `keyboard.bindings` also supports these fields:
 
@@ -262,6 +267,11 @@ The repository includes a standalone script, `uconsole-voice-ptt`, intended to b
 ```toml
 [[gamepad.bindings]]
 buttons = ["BTN_THUMB2"]
+command = "~/.local/bin/uconsole-voice-ptt learn"
+
+[[gamepad.bindings]]
+buttons = ["BTN_THUMB2"]
+hold_ms = 600
 press_command = "~/.local/bin/uconsole-voice-ptt start"
 release_command = "~/.local/bin/uconsole-voice-ptt stop"
 ```
@@ -281,8 +291,8 @@ Example `voice.env`:
 WHISPER_URL=http://127.0.0.1:3300/api/asr/transcriptions
 WHISPER_MODEL=faster-whisper-small
 WHISPER_LANGUAGE=zh
+WHISPER_AUTH_TOKEN=fa_asr_replace_me
 WHISPER_CORRECTION_MODE=auto
-WHISPER_CORRECTION_PROFILE_ID=technical_development
 VOICE_OUTPUT_MODE=paste
 VOICE_TMUX_OUTPUT_MODE=type
 VOICE_WECHAT_OUTPUT_MODE=paste
@@ -300,6 +310,10 @@ VOICE_MAX_RECORD_MS=60000
 Optional ASR request variables:
 
 ```bash
+# FlashAI personal ASR Token. Required for transcription and the tmux/Codex learning shortcut.
+# WHISPER_AUTH_TOKEN=fa_asr_xxx
+# Optional explicit finalize URL. Defaults from WHISPER_URL.
+# WHISPER_FINALIZE_URL=http://127.0.0.1:3300/api/asr/transcription-events/{requestId}/finalize
 # Optional short ASR hint sent to the upstream transcription model.
 # WHISPER_PROMPT=
 # Multipart field name for the ASR prompt. Defaults to prompt.
@@ -312,8 +326,6 @@ Optional ASR request variables:
 # WHISPER_CONTEXT_FIELD=contextText
 # ASR correction mode: off | on | auto. Auto keeps normal text fast and corrects code/command mixed input.
 # WHISPER_CORRECTION_MODE=auto
-# Server preset correction profile id. Empty disables profile selection. Defaults to technical_development.
-# WHISPER_CORRECTION_PROFILE_ID=technical_development
 # Legacy compatibility only; prefer WHISPER_CORRECTION_MODE.
 # WHISPER_ENABLE_CORRECTION=0
 # ASR request timeout in seconds. Defaults to 60; use 0 to disable.
@@ -325,14 +337,24 @@ VOICE_TMUX_CONTEXT=1
 # If the visible area is too short, fall back to at least this many recent lines.
 # VOICE_TMUX_CONTEXT_LINES=30
 # VOICE_TMUX_CONTEXT_MAX_CHARS=1200
+# Short-press B correction dialog guardrails. Corrections too different from the last ASR text are rejected.
+# VOICE_LEARN_MAX_AGE_SECONDS=600
+# VOICE_LEARN_MAX_EDIT_RATIO=0.38
+# VOICE_LEARN_REPLACE_INPUT=1
+# VOICE_LEARN_REPLACE_MAX_CHARS=300
+# VOICE_LEARN_DIALOG_FONT_SIZE=22
+# VOICE_LEARN_DIALOG_WIDTH=820
+# VOICE_LEARN_DIALOG_HEIGHT=220
 ```
 
 Script behavior:
 
 - `start`: starts recording
-- `stop`: stops recording, uploads the audio to Whisper, retrieves the transcript, and injects it into the currently focused input field
+- `stop`: stops recording, uploads the audio to FlashAI ASR, retrieves the transcript, injects it into the currently focused input field, and stores the last ASR state for later correction
+- `learn`: short-press correction action. It opens an edit dialog prefilled with the last ASR text; pressing Enter submits the edited text to FlashAI finalize and, by default, replaces the previously inserted ASR text in the active input
 - `cancel`: stops the active recording and deletes the audio without sending it to ASR
-- if the focused input is a tmux terminal window, the script captures the current active tmux pane visible text; if that is shorter than the minimum line budget, it falls back to the most recent lines before sending the context multipart field for correction
+- if a tmux terminal is available, the script captures the current active tmux pane visible text as context for ASR correction; learning itself no longer reverse-extracts text from tmux output
+- learning is intentionally conservative: if the state expired, the edited text is empty, unchanged, too different, or the replacement would delete too many characters, the script refuses to learn or skips input replacement
 
 Supported output modes:
 

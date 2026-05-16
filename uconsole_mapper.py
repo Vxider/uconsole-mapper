@@ -315,8 +315,6 @@ def validate_binding(binding: Binding) -> None:
     if phase_action:
         if action_count != 0:
             raise ValueError("phase bindings cannot be combined with command, emit_key, emit_rel, or text")
-        if binding.hold_ms != 0 or binding.repeat_ms != 0:
-            raise ValueError("phase bindings do not support hold_ms or repeat_ms")
     elif action_count != 1:
         raise ValueError("binding must define exactly one of command, emit_key, emit_rel, or text")
     if binding.press_enter and binding.text is None:
@@ -329,6 +327,8 @@ def validate_binding(binding: Binding) -> None:
         raise ValueError("hold_ms must be >= 0")
     if binding.repeat_ms < 0:
         raise ValueError("repeat_ms must be >= 0")
+    if phase_action and binding.repeat_ms != 0:
+        raise ValueError("phase bindings do not support repeat_ms")
 
 
 class GamepadWatcher:
@@ -371,7 +371,8 @@ class GamepadWatcher:
         if not binding.buttons.issubset(self.pressed):
             return
         self.hold_fired_buttons.add(binding.buttons)
-        self._trigger_binding(binding)
+        if binding.press_command is None and binding.release_command is None:
+            self._trigger_binding(binding)
 
     def _trigger_binding(self, binding: Binding) -> None:
         if binding.command or binding.text is not None:
@@ -409,6 +410,8 @@ class GamepadWatcher:
                 self.active_bindings.add(index)
                 if binding.press_command is not None or binding.release_command is not None:
                     self.runner.run_phase(binding, "press", self.config.gamepad_debounce_ms)
+                    if binding.hold_ms > 0:
+                        self.hold_tasks[index] = asyncio.create_task(self._fire_hold(index, binding))
                 elif binding.hold_ms > 0:
                     self.hold_tasks[index] = asyncio.create_task(self._fire_hold(index, binding))
                 elif self._has_hold_variant(index, binding):
@@ -425,7 +428,10 @@ class GamepadWatcher:
                 task = self.repeat_tasks.pop(index, None)
                 if task is not None:
                     task.cancel()
-                if binding.press_command is not None or binding.release_command is not None:
+                if (
+                    (binding.press_command is not None or binding.release_command is not None)
+                    and (binding.hold_ms <= 0 or binding.buttons in self.hold_fired_buttons)
+                ):
                     self.runner.run_phase(binding, "release", self.config.gamepad_debounce_ms)
                 elif index in self.release_trigger_bindings:
                     self.release_trigger_bindings.remove(index)

@@ -14,6 +14,7 @@ Usage:
   uconsole-voice-ptt start
   uconsole-voice-ptt stop
   uconsole-voice-ptt cancel
+  uconsole-voice-ptt learn
 
 Configuration is read from:
   $VOICE_PTT_CONFIG
@@ -23,7 +24,8 @@ Supported variables:
   WHISPER_URL            required, whisper endpoint
   WHISPER_MODEL          optional transcription model id, sent as modelId
   WHISPER_LANGUAGE       optional multipart field
-  WHISPER_AUTH_TOKEN     optional bearer token
+  WHISPER_AUTH_TOKEN     required for FlashAI ASR, bearer token with asr:transcribe and asr:learn
+  WHISPER_FINALIZE_URL   optional finalize endpoint; defaults from WHISPER_URL
   WHISPER_PROMPT         optional short ASR prompt hint
   WHISPER_PROMPT_FIELD   multipart field for ASR prompt, default: prompt
   WHISPER_PROMPT_GLOSSARY_FIELD
@@ -33,8 +35,6 @@ Supported variables:
   WHISPER_CONTEXT_FIELD  multipart field for tmux context, default: contextText
   WHISPER_CORRECTION_MODE
                          off | on | auto, default: auto
-  WHISPER_CORRECTION_PROFILE_ID
-                         server preset correction profile id, default: technical_development
   WHISPER_ENABLE_CORRECTION
                          legacy compatibility only; 1 maps to correctionMode=on, 0 maps to off
   WHISPER_TEXT_JQ        jq expression, default: .data.text // .text // .result.text // empty
@@ -71,6 +71,20 @@ Supported variables:
                         minimum lines sent from the active tmux pane, default: 30
   VOICE_TMUX_CONTEXT_MAX_CHARS
                         max chars sent from tmux context, default: 1200
+  VOICE_LEARN_MAX_AGE_SECONDS
+                        max age for the last ASR state used by learn, default: 600
+  VOICE_LEARN_MAX_EDIT_RATIO
+                        max allowed correction edit ratio, default: 0.38
+  VOICE_LEARN_REPLACE_INPUT
+                        1 replaces the last inserted ASR text after correction, default: 1
+  VOICE_LEARN_REPLACE_MAX_CHARS
+                        max chars deleted when replacing ASR text, default: 300
+  VOICE_LEARN_DIALOG_FONT_SIZE
+                        correction dialog font size, default: 22
+  VOICE_LEARN_DIALOG_COMMAND
+                        custom correction dialog command, default: ~/.local/bin/uconsole-asr-correction-dialog
+  VOICE_LEARN_DIALOG_WIDTH / VOICE_LEARN_DIALOG_HEIGHT
+                        correction dialog size, defaults: 820 / 220
 EOF
 }
 
@@ -152,6 +166,11 @@ format_status_body() {
   else
     printf '%s' "${text}"
   fi
+}
+
+log_ptt() {
+  mkdir -p "${VOICE_STATE_DIR:-${XDG_STATE_HOME:-${HOME}/.local/state}/uconsole-mapper}"
+  printf '[%s] %s\n' "$(date '+%F %T')" "$*" >>"${VOICE_STATE_DIR:-${XDG_STATE_HOME:-${HOME}/.local/state}/uconsole-mapper}/voice-ptt.log" 2>/dev/null || true
 }
 
 get_fcitx5_state() {
@@ -273,6 +292,27 @@ trim() {
 
 normalize_transcript() {
   tr '\r\n' '  ' | sed 's/[[:space:]]\+/ /g' | trim
+}
+
+normalize_learn_text() {
+  perl -CS -pe 's/\e\[[0-9;?]*[ -\/]*[@-~]//g; s/\r//g' | sed 's/[[:space:]]\+$//'
+}
+
+derive_asr_finalize_url() {
+  local request_id=$1
+  [[ -n "${request_id}" ]] || return 1
+  if [[ -n "${WHISPER_FINALIZE_URL}" ]]; then
+    printf '%s\n' "${WHISPER_FINALIZE_URL//\{requestId\}/${request_id}}"
+    return 0
+  fi
+  case "${WHISPER_URL}" in
+    */api/asr/transcriptions)
+      printf '%s\n' "${WHISPER_URL%/api/asr/transcriptions}/api/asr/transcription-events/${request_id}/finalize"
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 sanitize_asr_context() {
@@ -409,8 +449,6 @@ capture_tmux_window_context() {
   local pane_text
 
   [[ "${VOICE_TMUX_CONTEXT}" == "1" ]] || return 1
-  terminal_window_is_active || return 1
-
   IFS=$'\t' read -r session_name window_id < <(resolve_tmux_window_target) || return 1
   window_name=$(
     tmux display-message -p -t "${window_id}" '#{window_name}' 2>/dev/null | tr -d '\r' || true
@@ -486,6 +524,70 @@ build_whisper_context() {
   tmux_context=$(capture_tmux_window_context || true)
   [[ -n "${tmux_context}" ]] || return 1
   printf '%s\n' "${tmux_context}"
+}
+
+current_tmux_target_json() {
+  [[ "${VOICE_TMUX_CONTEXT}" == "1" ]] || return 1
+  local session_name window_id pane_id pane_index pane_command
+  IFS=$'\t' read -r session_name window_id < <(resolve_tmux_window_target) || return 1
+  IFS=$'\t' read -r pane_id pane_index pane_command < <(
+    tmux list-panes -t "${window_id}" -F '#{?pane_active,#{pane_id}'$'\t''#{pane_index}'$'\t''#{pane_current_command},}' 2>/dev/null \
+      | awk 'NF { print; exit }'
+  ) || true
+  [[ -n "${pane_id}" ]] || return 1
+  jq -n \
+    --arg sessionName "${session_name:-}" \
+    --arg windowId "${window_id:-}" \
+    --arg paneId "${pane_id:-}" \
+    --arg paneIndex "${pane_index:-}" \
+    --arg paneCommand "${pane_command:-}" \
+    '{sessionName:$sessionName, windowId:$windowId, paneId:$paneId, paneIndex:$paneIndex, paneCommand:$paneCommand}'
+}
+
+capture_tmux_pane_text_for_learn() {
+  local pane_id=${1:-}
+  [[ -n "${pane_id}" ]] || return 1
+  tmux capture-pane -p -J -S "-${VOICE_LEARN_CAPTURE_LINES}" -t "${pane_id}" 2>/dev/null | normalize_learn_text
+}
+
+save_last_asr_state() {
+  local request_id=$1
+  local inserted_text=$2
+  local raw_text=$3
+  local corrected_text=$4
+  local before_text=$5
+  local after_text=$6
+  [[ -n "${request_id}" ]] || return 0
+  local target_json pane_id session_name window_id pane_command
+  target_json=$(current_tmux_target_json || true)
+  if [[ -z "${target_json}" ]]; then
+    pane_id=
+    session_name=
+    window_id=
+    pane_command=
+    log_ptt "save_last_asr_state: no tmux target requestId=${request_id} insertedChars=${#inserted_text}"
+  else
+    pane_id=$(jq -r '.paneId // empty' <<<"${target_json}")
+    session_name=$(jq -r '.sessionName // empty' <<<"${target_json}")
+    window_id=$(jq -r '.windowId // empty' <<<"${target_json}")
+    pane_command=$(jq -r '.paneCommand // empty' <<<"${target_json}")
+  fi
+  mkdir -p "${VOICE_STATE_DIR}"
+  jq -n \
+    --arg requestId "${request_id}" \
+    --arg insertedText "${inserted_text}" \
+    --arg rawText "${raw_text}" \
+    --arg correctedText "${corrected_text}" \
+    --arg paneId "${pane_id}" \
+    --arg sessionName "${session_name}" \
+    --arg windowId "${window_id}" \
+    --arg paneCommand "${pane_command}" \
+    --arg beforePaneText "${before_text}" \
+    --arg afterPaneText "${after_text}" \
+    --argjson createdAt "$(date +%s)" \
+    '{requestId:$requestId, insertedText:$insertedText, rawText:$rawText, correctedText:$correctedText, paneId:$paneId, sessionName:$sessionName, windowId:$windowId, paneCommand:$paneCommand, beforePaneText:$beforePaneText, afterPaneText:$afterPaneText, createdAt:$createdAt}' \
+    >"${LAST_ASR_STATE_FILE}"
+  log_ptt "saved last ASR state requestId=${request_id} pane=${pane_id} insertedChars=${#inserted_text}"
 }
 
 start_recording() {
@@ -686,6 +788,14 @@ stop_recording() {
     exit 1
   fi
 
+  if [[ -z "${WHISPER_AUTH_TOKEN}" ]]; then
+    echo "WHISPER_AUTH_TOKEN is required for FlashAI ASR" >&2
+    if [[ "${suppress_asr_status}" != "1" ]]; then
+      show_status "uconsole voice" "未配置 ASR Token" "0" "1200"
+    fi
+    exit 1
+  fi
+
   command -v curl >/dev/null 2>&1 || {
     echo "curl is required" >&2
     exit 1
@@ -702,6 +812,8 @@ stop_recording() {
   local prompt_glossary_json=
   local context_text=
   local correction_mode=
+  local before_pane_text=
+  before_pane_text=$(capture_tmux_pane_text_for_learn "$(current_tmux_target_json 2>/dev/null | jq -r '.paneId // empty' 2>/dev/null || true)" || true)
   local -a curl_args=(
     -fsS
     --max-time "${WHISPER_TIMEOUT}"
@@ -709,9 +821,7 @@ stop_recording() {
     "${WHISPER_URL}"
     -F "file=@${AUDIO_FILE}"
   )
-  if [[ -n "${WHISPER_AUTH_TOKEN}" ]]; then
-    curl_args+=(-H "Authorization: Bearer ${WHISPER_AUTH_TOKEN}")
-  fi
+  curl_args+=(-H "Authorization: Bearer ${WHISPER_AUTH_TOKEN}")
   if [[ -n "${WHISPER_MODEL}" ]]; then
     curl_args+=(-F "modelId=${WHISPER_MODEL}")
   fi
@@ -736,10 +846,6 @@ stop_recording() {
   elif [[ "${WHISPER_ENABLE_CORRECTION}" == "1" ]]; then
     curl_args+=(-F "enableCorrection=true")
   fi
-  if [[ -n "${WHISPER_CORRECTION_PROFILE_ID}" && "${correction_mode}" != "off" ]]; then
-    curl_args+=(--form-string "correctionProfileId=${WHISPER_CORRECTION_PROFILE_ID}")
-  fi
-
   if [[ "${suppress_asr_status}" != "1" ]]; then
     show_status "uconsole voice" "识别中..." "65" "0"
   fi
@@ -758,8 +864,11 @@ stop_recording() {
     exit 1
   fi
 
-  local text
+  local text request_id raw_text corrected_text
   text=$(jq -r "${WHISPER_TEXT_JQ}" "${response_file}" | normalize_transcript)
+  request_id=$(jq -r '.data.requestId // .requestId // empty' "${response_file}" | normalize_transcript)
+  raw_text=$(jq -r '.data.rawText // .rawText // empty' "${response_file}" | normalize_transcript)
+  corrected_text=$(jq -r '.data.correctedText // .correctedText // empty' "${response_file}" | normalize_transcript)
   rm -f "${response_file}"
 
   if [[ -z "${text}" ]]; then
@@ -778,10 +887,165 @@ stop_recording() {
     exit 1
   fi
 
+  local after_pane_text=
+  after_pane_text=$(capture_tmux_pane_text_for_learn "$(current_tmux_target_json 2>/dev/null | jq -r '.paneId // empty' 2>/dev/null || true)" || true)
+  if [[ -n "${request_id}" ]]; then
+    save_last_asr_state "${request_id}" "${text}" "${raw_text}" "${corrected_text}" "${before_pane_text}" "${after_pane_text}"
+  else
+    log_ptt "skip save_last_asr_state: ASR response missing requestId insertedChars=${#text}"
+  fi
+
   if [[ "${suppress_asr_status}" != "1" ]]; then
     close_status
   fi
   [[ "${VOICE_KEEP_AUDIO}" == "1" ]] || rm -f "${AUDIO_FILE}"
+}
+
+open_asr_correction_editor() {
+  local initial_text=$1
+  local title=${2:-"修正语音输入"}
+
+  log_ptt "open ASR correction editor chars=${#initial_text}"
+
+  local custom_editor="${VOICE_LEARN_DIALOG_COMMAND:-${HOME}/.local/bin/uconsole-asr-correction-dialog}"
+  if [[ -x "${custom_editor}" ]]; then
+    QT_QPA_PLATFORM=${QT_QPA_PLATFORM:-wayland} "${custom_editor}" "${initial_text}" "${title}"
+    return $?
+  fi
+  if command -v uconsole-asr-correction-dialog >/dev/null 2>&1; then
+    QT_QPA_PLATFORM=${QT_QPA_PLATFORM:-wayland} uconsole-asr-correction-dialog "${initial_text}" "${title}"
+    return $?
+  fi
+
+  if command -v kdialog >/dev/null 2>&1; then
+    QT_QPA_PLATFORM=${QT_QPA_PLATFORM:-wayland} kdialog --title "${title}" --inputbox "修正上次语音识别文本" "${initial_text}"
+    return $?
+  fi
+
+  if command -v zenity >/dev/null 2>&1; then
+    zenity --entry \
+      --title="${title}" \
+      --text="修正上次语音识别文本，按回车确认" \
+      --entry-text="${initial_text}"
+    return $?
+  fi
+
+  echo "zenity or kdialog is required for ASR correction editor" >&2
+  return 127
+}
+
+compute_edit_ratio() {
+  python3 - "$1" "$2" <<'PYRATIO'
+import difflib, sys
+old = sys.argv[1].strip()
+new = sys.argv[2].strip()
+print(1.0 - difflib.SequenceMatcher(None, old, new).ratio())
+PYRATIO
+}
+
+replace_last_inserted_text() {
+  local old_text=$1
+  local new_text=$2
+  [[ "${VOICE_LEARN_REPLACE_INPUT}" == "1" ]] || return 0
+  [[ "${old_text}" != "${new_text}" ]] || return 0
+  command -v wtype >/dev/null 2>&1 || return 1
+
+  local count=${#old_text}
+  if (( count < 1 || count > VOICE_LEARN_REPLACE_MAX_CHARS )); then
+    log_ptt "skip replace_last_inserted_text: old text length out of range chars=${count}"
+    return 1
+  fi
+
+  suspend_ime_for_injection
+  local i
+  for ((i = 0; i < count; i++)); do
+    wtype -k BackSpace
+  done
+  wtype "${new_text}"
+  restore_ime_after_injection
+}
+
+learn_last_asr() {
+  if [[ -f "${STATE_FILE}" ]]; then
+    cancel_recording "已取消短按录音" || true
+  fi
+  command -v jq >/dev/null 2>&1 || { echo "jq is required" >&2; exit 1; }
+  command -v curl >/dev/null 2>&1 || { echo "curl is required" >&2; exit 1; }
+  if [[ -z "${WHISPER_AUTH_TOKEN}" ]]; then
+    show_status "uconsole voice" "未配置 ASR Token" "0" "1200"
+    exit 1
+  fi
+  if [[ ! -s "${LAST_ASR_STATE_FILE}" ]]; then
+    show_status "uconsole voice" "没有可学习的语音输入" "0" "1000"
+    exit 1
+  fi
+
+  local request_id inserted_text created_at now age final_text finalize_url edit_ratio
+  request_id=$(jq -r '.requestId // empty' "${LAST_ASR_STATE_FILE}")
+  inserted_text=$(jq -r '.insertedText // empty' "${LAST_ASR_STATE_FILE}")
+  created_at=$(jq -r '.createdAt // 0' "${LAST_ASR_STATE_FILE}")
+  now=$(date +%s)
+  age=$((now - created_at))
+
+  if [[ -z "${request_id}" || -z "${inserted_text}" ]]; then
+    show_status "uconsole voice" "语音输入状态不完整，未学习" "0" "1000"
+    exit 1
+  fi
+  if (( age < 0 || age > VOICE_LEARN_MAX_AGE_SECONDS )); then
+    show_status "uconsole voice" "语音输入已过期，未学习" "0" "1000"
+    exit 1
+  fi
+
+  log_ptt "learn_last_asr: requestId=${request_id} insertedChars=${#inserted_text}"
+  final_text=$(open_asr_correction_editor "${inserted_text}" || true)
+  final_text=$(printf '%s' "${final_text}" | normalize_transcript)
+  if [[ -z "${final_text}" ]]; then
+    show_status "uconsole voice" "已取消学习" "0" "900"
+    exit 0
+  fi
+  if [[ "${final_text}" == "${inserted_text}" ]]; then
+    show_status "uconsole voice" "文本未修改，未学习" "0" "900"
+    exit 0
+  fi
+
+  edit_ratio=$(compute_edit_ratio "${inserted_text}" "${final_text}")
+  if ! python3 - "${edit_ratio}" "${VOICE_LEARN_MAX_EDIT_RATIO}" <<'PYCHECK'
+import sys
+ratio = float(sys.argv[1])
+limit = float(sys.argv[2])
+raise SystemExit(0 if ratio <= limit else 1)
+PYCHECK
+  then
+    log_ptt "skip learn_last_asr: edit ratio too large ratio=${edit_ratio} limit=${VOICE_LEARN_MAX_EDIT_RATIO}"
+    show_status "uconsole voice" "差异过大，未学习" "0" "1200"
+    exit 1
+  fi
+
+  finalize_url=$(derive_asr_finalize_url "${request_id}" || true)
+  if [[ -z "${finalize_url}" ]]; then
+    show_status "uconsole voice" "无法生成学习接口" "0" "1200"
+    exit 1
+  fi
+  run_whisper_curl \
+    -fsS \
+    --max-time "${WHISPER_TIMEOUT}" \
+    -X POST \
+    -H "Authorization: Bearer ${WHISPER_AUTH_TOKEN}" \
+    -H "Content-Type: application/json" \
+    --data "$(jq -n --arg finalText "${final_text}" '{finalText: $finalText}')" \
+    "${finalize_url}" >/dev/null
+
+  if ! replace_last_inserted_text "${inserted_text}" "${final_text}"; then
+    show_status "uconsole voice" "已学习，未改写输入框" "80" "1200"
+    exit 0
+  fi
+
+  jq --arg finalText "${final_text}" --argjson finalizedAt "$(date +%s)" \
+    '.finalText=$finalText | .finalizedAt=$finalizedAt' \
+    "${LAST_ASR_STATE_FILE}" >"${LAST_ASR_STATE_FILE}.tmp" \
+    && mv "${LAST_ASR_STATE_FILE}.tmp" "${LAST_ASR_STATE_FILE}"
+  log_ptt "learned ASR correction requestId=${request_id} oldChars=${#inserted_text} finalChars=${#final_text} editRatio=${edit_ratio}"
+  show_status "uconsole voice" "已学习并改写输入" "100" "900"
 }
 
 cancel_recording() {
@@ -856,8 +1120,8 @@ WHISPER_PROMPT=${WHISPER_PROMPT:-}
 WHISPER_PROMPT_FIELD=${WHISPER_PROMPT_FIELD:-prompt}
 WHISPER_PROMPT_GLOSSARY_FIELD=${WHISPER_PROMPT_GLOSSARY_FIELD:-promptGlossary}
 WHISPER_CONTEXT_FIELD=${WHISPER_CONTEXT_FIELD:-contextText}
+WHISPER_FINALIZE_URL=${WHISPER_FINALIZE_URL:-}
 WHISPER_ENABLE_CORRECTION=${WHISPER_ENABLE_CORRECTION:-}
-WHISPER_CORRECTION_PROFILE_ID=${WHISPER_CORRECTION_PROFILE_ID:-technical_development}
 WHISPER_CORRECTION_MODE=${WHISPER_CORRECTION_MODE:-}
 if [[ -z "${WHISPER_CORRECTION_MODE}" ]]; then
   if [[ "${WHISPER_ENABLE_CORRECTION}" == "1" ]]; then
@@ -871,6 +1135,15 @@ fi
 WHISPER_TEXT_JQ=${WHISPER_TEXT_JQ:-'.data.text // .text // .result.text // empty'}
 WHISPER_NO_PROXY=${WHISPER_NO_PROXY:-1}
 WHISPER_TIMEOUT=${WHISPER_TIMEOUT:-60}
+VOICE_LEARN_MAX_AGE_SECONDS=${VOICE_LEARN_MAX_AGE_SECONDS:-600}
+VOICE_LEARN_MAX_EDIT_RATIO=${VOICE_LEARN_MAX_EDIT_RATIO:-0.38}
+VOICE_LEARN_CAPTURE_LINES=${VOICE_LEARN_CAPTURE_LINES:-120}
+VOICE_LEARN_REPLACE_INPUT=${VOICE_LEARN_REPLACE_INPUT:-1}
+VOICE_LEARN_REPLACE_MAX_CHARS=${VOICE_LEARN_REPLACE_MAX_CHARS:-300}
+VOICE_LEARN_DIALOG_FONT_SIZE=${VOICE_LEARN_DIALOG_FONT_SIZE:-22}
+VOICE_LEARN_DIALOG_WIDTH=${VOICE_LEARN_DIALOG_WIDTH:-820}
+VOICE_LEARN_DIALOG_HEIGHT=${VOICE_LEARN_DIALOG_HEIGHT:-220}
+LAST_ASR_STATE_FILE=${LAST_ASR_STATE_FILE:-"${VOICE_STATE_DIR}/voice-last-asr.json"}
 
 case "${ACTION}" in
   start)
@@ -881,6 +1154,9 @@ case "${ACTION}" in
     ;;
   cancel)
     cancel_recording
+    ;;
+  learn)
+    learn_last_asr
     ;;
   *)
     echo "unknown action: ${ACTION}" >&2
