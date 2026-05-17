@@ -71,6 +71,17 @@ command = "~/.local/bin/esc-switch-ime-english"
 # buttons = ["KEY_RIGHTSHIFT", "KEY_ENTER"]
 # command = "~/.local/bin/shift-enter-newline"
 
+[lock]
+enabled = false
+key = "KEY_COFFEE"
+lock_command = "sudo -n /usr/local/bin/uconsole-mapper-display-control off"
+unlock_command = "sudo -n /usr/local/bin/uconsole-mapper-display-control on"
+
+[power_button]
+enabled = false
+device_name_patterns = ["axp20x-pek"]
+hold_ms = 700
+
 [mouse]
 enabled = true
 grab = true

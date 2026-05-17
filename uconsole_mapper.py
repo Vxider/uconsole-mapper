@@ -88,6 +88,13 @@ class Config:
     keyboard_repeat_rate: int
     keyboard_repeat_delay_ms: int
     keyboard_bindings: list[Binding]
+    lock_enabled: bool
+    lock_key: int
+    lock_command: str | None
+    unlock_command: str | None
+    power_button_enabled: bool
+    power_button_patterns: list[str]
+    power_button_hold_ms: int
     mouse_enabled: bool
     mouse_grab: bool
     mouse_patterns: list[str]
@@ -104,12 +111,47 @@ class DeviceWriteError(RuntimeError):
     pass
 
 
+class LockController:
+    def __init__(self, config: Config, runner: ActionRunner) -> None:
+        self.config = config
+        self.runner = runner
+        self.locked = False
+        self.listeners: list[Any] = []
+
+    def add_listener(self, listener: Any) -> None:
+        self.listeners.append(listener)
+
+    def is_lock_key(self, code: int) -> bool:
+        return self.config.lock_enabled and code == self.config.lock_key
+
+    def handle_lock_key(self, value: int) -> bool:
+        if value != 1:
+            return True
+
+        self.locked = not self.locked
+        command = self.config.lock_command if self.locked else self.config.unlock_command
+        LOGGER.info("keyboard lock %s", "enabled" if self.locked else "disabled")
+        for listener in list(self.listeners):
+            try:
+                listener()
+            except OSError as exc:
+                LOGGER.warning("lock listener failed: %s", exc)
+        if command:
+            self.runner.run(
+                Binding(buttons=frozenset({self.config.lock_key}), command=command),
+                debounce_ms=0,
+            )
+        return True
+
+
 def load_config(path: Path) -> Config:
     raw = tomllib.loads(path.read_text(encoding="utf-8"))
 
     general = raw.get("general", {})
     gamepad = raw.get("gamepad", {})
     keyboard = raw.get("keyboard", {})
+    lock = raw.get("lock", {})
+    power_button = raw.get("power_button", {})
     mouse = raw.get("mouse", {})
     bindings_raw = gamepad.get("bindings", [])
     keyboard_bindings_raw = keyboard.get("bindings", [])
@@ -176,6 +218,13 @@ def load_config(path: Path) -> Config:
         keyboard_repeat_rate=int(keyboard.get("repeat_rate", 30)),
         keyboard_repeat_delay_ms=int(keyboard.get("repeat_delay_ms", 300)),
         keyboard_bindings=keyboard_bindings,
+        lock_enabled=bool(lock.get("enabled", False)),
+        lock_key=code_from_name(lock.get("key", "KEY_COFFEE")),
+        lock_command=expand_path(lock["lock_command"]) if lock.get("lock_command") else None,
+        unlock_command=expand_path(lock["unlock_command"]) if lock.get("unlock_command") else None,
+        power_button_enabled=bool(power_button.get("enabled", False)),
+        power_button_patterns=list(power_button.get("device_name_patterns", ["axp20x-pek"])),
+        power_button_hold_ms=int(power_button.get("hold_ms", 700)),
         mouse_enabled=bool(mouse.get("enabled", True)),
         mouse_grab=bool(mouse.get("grab", True)),
         mouse_patterns=list(mouse.get("device_name_patterns", [])),
@@ -332,10 +381,17 @@ def validate_binding(binding: Binding) -> None:
 
 
 class GamepadWatcher:
-    def __init__(self, device: InputDevice, config: Config, runner: ActionRunner) -> None:
+    def __init__(
+        self,
+        device: InputDevice,
+        config: Config,
+        runner: ActionRunner,
+        lock_controller: LockController,
+    ) -> None:
         self.device = device
         self.config = config
         self.runner = runner
+        self.lock_controller = lock_controller
         for binding in self.config.gamepad_bindings:
             validate_binding(binding)
         self.pressed: set[int] = set()
@@ -344,22 +400,61 @@ class GamepadWatcher:
         self.hold_fired_buttons: set[frozenset[int]] = set()
         self.release_trigger_bindings: set[int] = set()
         self.repeat_tasks: dict[int, asyncio.Task[None]] = {}
+        self.grabbed_for_lock = False
+        self.lock_controller.add_listener(self._sync_lock_grab)
 
     async def run(self) -> None:
         LOGGER.info("watch gamepad: %s (%s)", self.device.name, self.device.path)
         try:
-            async for event in self.device.async_read_loop():
+            while True:
+                self._sync_lock_grab()
+                try:
+                    event = await asyncio.wait_for(self.device.async_read_one(), timeout=0.25)
+                except asyncio.TimeoutError:
+                    continue
                 if event.type != ecodes.EV_KEY:
+                    continue
+                if self.lock_controller.locked:
                     continue
                 self._handle_key(event.code, event.value)
         except OSError as exc:
             LOGGER.warning("gamepad watcher stopped for %s: %s", self.device.path, exc)
         finally:
+            if self.grabbed_for_lock:
+                try:
+                    self.device.ungrab()
+                except OSError:
+                    pass
             for task in self.hold_tasks.values():
                 task.cancel()
             for task in self.repeat_tasks.values():
                 task.cancel()
             self.device.close()
+
+    def _sync_lock_grab(self) -> None:
+        if not self.config.lock_enabled:
+            return
+        if self.lock_controller.locked and not self.grabbed_for_lock:
+            self.device.grab()
+            self.grabbed_for_lock = True
+            self._clear_state()
+            return
+        if not self.lock_controller.locked and self.grabbed_for_lock:
+            self.device.ungrab()
+            self.grabbed_for_lock = False
+            self._clear_state()
+
+    def _clear_state(self) -> None:
+        self.pressed.clear()
+        self.active_bindings.clear()
+        self.hold_fired_buttons.clear()
+        self.release_trigger_bindings.clear()
+        for task in self.hold_tasks.values():
+            task.cancel()
+        self.hold_tasks.clear()
+        for task in self.repeat_tasks.values():
+            task.cancel()
+        self.repeat_tasks.clear()
 
     async def _fire_hold(self, index: int, binding: Binding) -> None:
         try:
@@ -493,17 +588,105 @@ class VirtualKeyboard:
             raise DeviceWriteError(f"virtual keyboard write failed for key {code} value {value}: {exc}") from exc
 
 
+class VirtualPowerButton:
+    def __init__(self) -> None:
+        self.ui = UInput(
+            {ecodes.EV_KEY: [ecodes.KEY_POWER]},
+            name="uconsole-virtual-power-button",
+        )
+
+    def close(self) -> None:
+        self.ui.close()
+
+    def click(self) -> None:
+        self.ui.write(ecodes.EV_KEY, ecodes.KEY_POWER, 1)
+        self.ui.syn()
+        self.ui.write(ecodes.EV_KEY, ecodes.KEY_POWER, 0)
+        self.ui.syn()
+
+
+class PowerButtonWatcher:
+    def __init__(
+        self,
+        device: InputDevice,
+        config: Config,
+        lock_controller: LockController,
+        virtual_power_button: VirtualPowerButton,
+    ) -> None:
+        self.device = device
+        self.config = config
+        self.lock_controller = lock_controller
+        self.virtual_power_button = virtual_power_button
+        self.down_at: float | None = None
+        self.hold_task: asyncio.Task[None] | None = None
+        self.hold_fired = False
+
+    async def run(self) -> None:
+        grabbed = False
+        LOGGER.info("watch power button: %s (%s)", self.device.name, self.device.path)
+        try:
+            self.device.grab()
+            grabbed = True
+            async for event in self.device.async_read_loop():
+                if event.type != ecodes.EV_KEY or event.code != ecodes.KEY_POWER:
+                    continue
+                self._handle_power(event.value)
+        except OSError as exc:
+            LOGGER.warning("power button watcher stopped for %s: %s", self.device.path, exc)
+        finally:
+            if grabbed:
+                try:
+                    self.device.ungrab()
+                except OSError:
+                    pass
+            if self.hold_task is not None:
+                self.hold_task.cancel()
+            self.device.close()
+
+    def _handle_power(self, value: int) -> None:
+        if value == 1:
+            self.down_at = time.monotonic()
+            self.hold_fired = False
+            if self.hold_task is not None:
+                self.hold_task.cancel()
+            self.hold_task = asyncio.create_task(self._fire_hold())
+            return
+
+        if value != 0:
+            return
+
+        if self.hold_task is not None:
+            self.hold_task.cancel()
+            self.hold_task = None
+
+        if not self.hold_fired:
+            LOGGER.info("power button short press: toggle display lock")
+            self.lock_controller.handle_lock_key(1)
+        self.down_at = None
+
+    async def _fire_hold(self) -> None:
+        try:
+            await asyncio.sleep(self.config.power_button_hold_ms / 1000)
+        except asyncio.CancelledError:
+            return
+        self.hold_fired = True
+        LOGGER.info("power button long press: emit KEY_POWER")
+        self.virtual_power_button.click()
+
+
 class KeyboardWatcher:
     def __init__(
         self,
         device: InputDevice,
         config: Config,
         runner: ActionRunner,
+        lock_controller: LockController,
         virtual_mouse: VirtualMouse | None = None,
     ) -> None:
         self.device = device
         self.config = config
         self.runner = runner
+        self.lock_controller = lock_controller
         self.virtual_mouse = virtual_mouse
         for binding in self.config.keyboard_bindings:
             validate_binding(binding)
@@ -528,27 +711,30 @@ class KeyboardWatcher:
         self.repeat_tasks: dict[int, asyncio.Task[None]] = {}
         self.grab_active = self.virtual_keyboard is not None
         self.grab_degraded = False
+        self.grabbed = False
+        self.lock_controller.add_listener(self._sync_lock_grab)
 
     async def run(self) -> None:
-        grabbed = False
         LOGGER.info("watch keyboard: %s (%s)", self.device.name, self.device.path)
         try:
             if self.grab_active:
                 self.device.grab()
-                grabbed = True
+                self.grabbed = True
             async for event in self.device.async_read_loop():
                 if event.type != ecodes.EV_KEY:
                     continue
+                self._sync_lock_grab()
                 try:
                     self._handle_key(event.code, event.value)
                 except DeviceWriteError as exc:
-                    if not self._degrade_to_passthrough(exc, grabbed):
+                    if not self._degrade_to_passthrough(exc, self.grabbed):
                         raise
-                    grabbed = False
+                    self.grabbed = False
+                self._sync_lock_grab()
         except OSError as exc:
             LOGGER.warning("keyboard watcher stopped for %s: %s", self.device.path, exc)
         finally:
-            if grabbed:
+            if self.grabbed:
                 try:
                     self.device.ungrab()
                 except OSError:
@@ -558,6 +744,27 @@ class KeyboardWatcher:
             for task in self.repeat_tasks.values():
                 task.cancel()
             self.device.close()
+
+    def _sync_lock_grab(self) -> None:
+        if not self.config.lock_enabled or self.grab_active:
+            return
+        if self.lock_controller.locked and not self.grabbed:
+            self.device.grab()
+            self.grabbed = True
+            return
+        if not self.lock_controller.locked and self.grabbed:
+            self.device.ungrab()
+            self.grabbed = False
+
+    def _clear_keyboard_state(self) -> None:
+        self.pressed.clear()
+        self.pending_order.clear()
+        self.pending_set.clear()
+        self.active_bindings.clear()
+        self.consumed_keys.clear()
+        for task in self.repeat_tasks.values():
+            task.cancel()
+        self.repeat_tasks.clear()
 
     def _degrade_to_passthrough(self, exc: DeviceWriteError, grabbed: bool) -> bool:
         if not self.grab_active or self.grab_degraded:
@@ -673,6 +880,16 @@ class KeyboardWatcher:
             return
 
     def _handle_key(self, code: int, value: int) -> None:
+        if self.lock_controller.is_lock_key(code):
+            was_locked = self.lock_controller.locked
+            self.lock_controller.handle_lock_key(value)
+            if was_locked and not self.lock_controller.locked:
+                self._clear_keyboard_state()
+            return
+
+        if self.lock_controller.locked:
+            return
+
         if not self.grab_active:
             self._handle_key_passthrough(code, value)
             return
@@ -722,6 +939,16 @@ class KeyboardWatcher:
         self.virtual_keyboard.write_key(code, 0)
 
     def _handle_key_passthrough(self, code: int, value: int) -> None:
+        if self.lock_controller.is_lock_key(code):
+            was_locked = self.lock_controller.locked
+            self.lock_controller.handle_lock_key(value)
+            if was_locked and not self.lock_controller.locked:
+                self._clear_keyboard_state()
+            return
+
+        if self.lock_controller.locked:
+            return
+
         is_pressed = value != 0
         if is_pressed:
             self.pressed.add(code)
@@ -793,35 +1020,65 @@ class VirtualMouse:
 
 
 class MouseWatcher:
-    def __init__(self, device: InputDevice, config: Config, virtual_mouse: VirtualMouse) -> None:
+    def __init__(
+        self,
+        device: InputDevice,
+        config: Config,
+        virtual_mouse: VirtualMouse,
+        lock_controller: LockController,
+    ) -> None:
         self.device = device
         self.config = config
         self.virtual_mouse = virtual_mouse
+        self.lock_controller = lock_controller
         self.remap_to_target = {item.from_code: item.to_code for item in config.mouse_remaps}
         self.target_sources: dict[int, set[int]] = {}
         for source, target in self.remap_to_target.items():
             self.target_sources.setdefault(target, {target}).add(source)
         self.source_state: dict[int, bool] = {}
         self.target_state: dict[int, int] = {}
+        self.grabbed = False
+        self.lock_controller.add_listener(self._sync_lock_grab)
 
     async def run(self) -> None:
-        grabbed = False
         LOGGER.info("watch mouse: %s (%s)", self.device.name, self.device.path)
         try:
             if self.config.mouse_grab:
                 self.device.grab()
-                grabbed = True
+                self.grabbed = True
             async for event in self.device.async_read_loop():
+                self._sync_lock_grab()
+                if self.lock_controller.locked:
+                    continue
+                if not self.config.mouse_grab:
+                    continue
                 self._handle_event(event)
         except OSError as exc:
             LOGGER.warning("mouse watcher stopped for %s: %s", self.device.path, exc)
         finally:
-            if grabbed:
+            if self.grabbed:
                 try:
                     self.device.ungrab()
                 except OSError:
                     pass
             self.device.close()
+
+    def _sync_lock_grab(self) -> None:
+        if not self.config.lock_enabled or self.config.mouse_grab:
+            return
+        if self.lock_controller.locked and not self.grabbed:
+            self.device.grab()
+            self.grabbed = True
+            self._clear_state()
+            return
+        if not self.lock_controller.locked and self.grabbed:
+            self.device.ungrab()
+            self.grabbed = False
+            self._clear_state()
+
+    def _clear_state(self) -> None:
+        self.source_state.clear()
+        self.target_state.clear()
 
     def _handle_event(self, event: Any) -> None:
         if event.type == ecodes.EV_REL:
@@ -861,7 +1118,9 @@ class MapperDaemon:
     def __init__(self, config: Config) -> None:
         self.config = config
         self.runner = ActionRunner()
+        self.lock_controller = LockController(config, self.runner)
         self.virtual_mouse = VirtualMouse() if config.mouse_enabled else None
+        self.virtual_power_button = VirtualPowerButton() if config.power_button_enabled else None
         self.tasks: dict[str, DeviceTask] = {}
         self.session_watch_baselines: dict[str, frozenset[int]] = {}
         self.session_watch_pending: dict[str, tuple[frozenset[int], float]] = {}
@@ -874,6 +1133,8 @@ class MapperDaemon:
             self.tasks.clear()
         if self.virtual_mouse is not None:
             self.virtual_mouse.close()
+        if self.virtual_power_button is not None:
+            self.virtual_power_button.close()
 
     async def run(self) -> None:
         while True:
@@ -910,18 +1171,35 @@ class MapperDaemon:
 
             role = self._detect_role(device)
             if role == "gamepad":
-                task = asyncio.create_task(GamepadWatcher(device, self.config, self.runner).run())
+                task = asyncio.create_task(
+                    GamepadWatcher(device, self.config, self.runner, self.lock_controller).run()
+                )
+                self.tasks[path] = DeviceTask(role=role, task=task)
+            elif role == "power_button":
+                if self.virtual_power_button is None:
+                    device.close()
+                    continue
+                task = asyncio.create_task(
+                    PowerButtonWatcher(
+                        device,
+                        self.config,
+                        self.lock_controller,
+                        self.virtual_power_button,
+                    ).run()
+                )
                 self.tasks[path] = DeviceTask(role=role, task=task)
             elif role == "keyboard":
                 task = asyncio.create_task(
-                    KeyboardWatcher(device, self.config, self.runner, self.virtual_mouse).run()
+                    KeyboardWatcher(device, self.config, self.runner, self.lock_controller, self.virtual_mouse).run()
                 )
                 self.tasks[path] = DeviceTask(role=role, task=task)
             elif role == "mouse":
                 if self.virtual_mouse is None:
                     device.close()
                     continue
-                task = asyncio.create_task(MouseWatcher(device, self.config, self.virtual_mouse).run())
+                task = asyncio.create_task(
+                    MouseWatcher(device, self.config, self.virtual_mouse, self.lock_controller).run()
+                )
                 self.tasks[path] = DeviceTask(role=role, task=task)
             else:
                 device.close()
@@ -1014,6 +1292,13 @@ class MapperDaemon:
         if self.config.mouse_enabled and self._is_mouse(device.name, key_caps, rel_caps):
             return "mouse"
 
+        if (
+            self.config.power_button_enabled
+            and match_any(device.name, self.config.power_button_patterns)
+            and ecodes.KEY_POWER in key_caps
+        ):
+            return "power_button"
+
         return None
 
     def _binding_codes(self) -> set[int]:
@@ -1026,6 +1311,8 @@ class MapperDaemon:
         codes: set[int] = set()
         for binding in self.config.keyboard_bindings:
             codes.update(binding.buttons)
+        if self.config.lock_enabled:
+            codes.add(self.config.lock_key)
         return codes
 
     def _is_mouse(self, name: str, key_caps: set[int], rel_caps: set[int]) -> bool:

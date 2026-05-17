@@ -69,6 +69,17 @@ install -m 0755 "${SCRIPT_DIR}/sync_labwc_keybinds.py" "${APP_DIR}/sync_labwc_ke
 install -m 0755 "${SCRIPT_DIR}/sync_keyd_default_conf.py" "${APP_DIR}/sync_keyd_default_conf.py"
 install -m 0644 "${SCRIPT_DIR}/uconsole-mapper.service" "${SYSTEMD_DIR}/uconsole-mapper.service"
 sudo install -m 0755 "${SCRIPT_DIR}/uconsole-launch-in-session.sh" /usr/local/bin/uconsole-launch-in-session
+sudo install -m 0755 "${SCRIPT_DIR}/uconsole-mapper-display-control" /usr/local/bin/uconsole-mapper-display-control
+
+SUDOERS_FILE="/etc/sudoers.d/uconsole-mapper-display-control"
+SUDOERS_LINE="${USER} ALL=(root) NOPASSWD: /usr/local/bin/uconsole-mapper-display-control *"
+if [[ ! -f "${SUDOERS_FILE}" ]] || ! sudo grep -Fxq "${SUDOERS_LINE}" "${SUDOERS_FILE}"; then
+  tmp_sudoers="$(mktemp)"
+  printf '%s\n' "${SUDOERS_LINE}" > "${tmp_sudoers}"
+  sudo visudo -cf "${tmp_sudoers}" >/dev/null
+  sudo install -m 0440 "${tmp_sudoers}" "${SUDOERS_FILE}"
+  rm -f "${tmp_sudoers}"
+fi
 
 if [[ ! -f "${CONFIG_DIR}/config.toml" ]]; then
   install -m 0644 "${SCRIPT_DIR}/config.toml.example" "${CONFIG_DIR}/config.toml"
